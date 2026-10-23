@@ -1,37 +1,38 @@
 import os
+import pkgutil
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from bot import cogs
+
 load_dotenv()
 
-intents = discord.Intents.default()
-intents.members = True
-bot = commands.Bot(
-    command_prefix=commands.when_mentioned,
-    help_command=None,
-    intents=intents,
-    allowed_contexts=app_commands.AppCommandContext(guild=True, dm_channel=True),
-)
 
+class Bot(commands.Bot):
+    def __init__(self) -> None:
+        intents = discord.Intents.default()
+        intents.members = True
+        super().__init__(
+            command_prefix=commands.when_mentioned,
+            help_command=None,
+            intents=intents,
+            allowed_contexts=app_commands.AppCommandContext(guild=True, dm_channel=True),
+        )
 
-@bot.event
-async def setup_hook() -> None:
-    synced = await bot.tree.sync()
-    print(f"Synced {len(synced)} global commands")
+    async def setup_hook(self) -> None:
+        for module in pkgutil.iter_modules(cogs.__path__, f"{cogs.__name__}."):
+            await self.load_extension(module.name)
+            print(f"Loaded {module.name}")
 
+        synced = await self.tree.sync()
+        print(f"Synced {len(synced)} global commands")
 
-@bot.event
-async def on_ready() -> None:
-    print(f"We have logged in as {bot.user}")
-
-
-@bot.tree.command(description="測試 bot 延遲")
-async def ping(interaction: discord.Interaction) -> None:
-    await interaction.response.send_message(f"Pong! {round(bot.latency * 1000)}ms")
+    async def on_ready(self) -> None:
+        print(f"We have logged in as {self.user}")
 
 
 if __name__ == "__main__":
-    bot.run(os.environ["DISCORD_TOKEN"])
+    Bot().run(os.environ["DISCORD_TOKEN"])

@@ -25,7 +25,7 @@ line-length = 100
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "ASYNC"]
 
 [tool.mypy]
-files = ["main.py"]
+files = ["main.py", "bot", "tests"]
 strict = true
 
 [tool.pytest.ini_options]
