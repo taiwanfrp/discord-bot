@@ -1,3 +1,4 @@
+import logging
 import os
 import pkgutil
 
@@ -7,6 +8,9 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from bot import cogs
+from bot.core.tree import CommandTree
+
+log = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -19,20 +23,21 @@ class Bot(commands.Bot):
             command_prefix=commands.when_mentioned,
             help_command=None,
             intents=intents,
+            tree_cls=CommandTree,
             allowed_contexts=app_commands.AppCommandContext(guild=True, dm_channel=True),
         )
 
     async def setup_hook(self) -> None:
         for module in pkgutil.iter_modules(cogs.__path__, f"{cogs.__name__}."):
             await self.load_extension(module.name)
-            print(f"Loaded {module.name}")
+            log.info("Loaded %s", module.name)
 
         synced = await self.tree.sync()
-        print(f"Synced {len(synced)} global commands")
+        log.info("Synced %d global commands", len(synced))
 
     async def on_ready(self) -> None:
-        print(f"We have logged in as {self.user}")
+        log.info("We have logged in as %s", self.user)
 
 
 if __name__ == "__main__":
-    Bot().run(os.environ["DISCORD_TOKEN"])
+    Bot().run(os.environ["DISCORD_TOKEN"], root_logger=True)
