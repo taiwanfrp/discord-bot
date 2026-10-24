@@ -36,6 +36,9 @@ def make_text_channel(channel_id: int, name: str = "general") -> MagicMock:
     channel.category_id = None
     channel.position = 0
     channel.send = AsyncMock(return_value=SimpleNamespace(id=channel_id * 10))
+    channel.create_webhook = AsyncMock(return_value=SimpleNamespace(id=7, token="webhook-token"))
+    channel.set_permissions = AsyncMock()
+    channel.delete = AsyncMock()
     partial = MagicMock()
     partial.edit = AsyncMock(side_effect=lambda **_: SimpleNamespace(id=partial.message_id))
     partial.delete = AsyncMock()
@@ -58,21 +61,45 @@ def make_category_channel(channel_id: int, name: str = "客服單") -> MagicMock
     return channel
 
 
-def make_member(user_id: int, role_ids: list[int]) -> SimpleNamespace:
-    return SimpleNamespace(
-        id=user_id,
-        name="user",
-        global_name="User",
-        nick="暱稱",
-        display_avatar=SimpleNamespace(url="https://cdn.discordapp.com/a.png"),
-        roles=[SimpleNamespace(id=role_id) for role_id in role_ids],
-        guild_permissions=SimpleNamespace(administrator=False),
-    )
+def _fill_user(user: MagicMock, user_id: int) -> MagicMock:
+    user.id = user_id
+    user.name = "user"
+    user.global_name = "User"
+    user.mention = f"<@{user_id}>"
+    user.bot = False
+    user.avatar = SimpleNamespace(key="avatarhash", url="https://cdn.discordapp.com/a.png")
+    user.display_avatar = user.avatar
+    return user
+
+
+def make_user(user_id: int) -> MagicMock:
+    """不在伺服器裡的使用者。"""
+    return _fill_user(MagicMock(spec=discord.User), user_id)
+
+
+def make_member(user_id: int, role_ids: list[int]) -> MagicMock:
+    member = _fill_user(MagicMock(spec=discord.Member), user_id)
+    member.nick = "暱稱"
+    member.guild_avatar = None
+    member.roles = [
+        SimpleNamespace(id=role_id, hoist=True, position=1, name="管理員", color=discord.Colour(1))
+        for role_id in role_ids
+    ]
+    member.guild_permissions = SimpleNamespace(administrator=False)
+    return member
 
 
 class FakeGuild:
     def __init__(self) -> None:
-        self.members: dict[int, SimpleNamespace] = {}
+        self.members: dict[int, MagicMock] = {}
+        self.me = discord.Object(1)
+        self.default_role = discord.Object(0)
+        # 開單時建立的頻道
+        self.created_channels: list[MagicMock] = []
+        self.create_text_channel = AsyncMock(side_effect=self._create_text_channel)
+        self.fetch_ban = AsyncMock(
+            side_effect=discord.NotFound(MagicMock(status=404), "not banned")
+        )
         self.channels: list[MagicMock] = []
         self.roles: list[MagicMock] = [make_role(ADMIN_ROLE_ID, "管理員")]
         self.emojis: dict[int, object] = {}
@@ -83,7 +110,13 @@ class FakeGuild:
         self.roles.append(role)
         return role
 
-    def get_member(self, user_id: int) -> SimpleNamespace | None:
+    async def _create_text_channel(self, name: str, **_: Any) -> MagicMock:
+        channel = make_text_channel(9000 + len(self.created_channels), name)
+        self.created_channels.append(channel)
+        self.channels.append(channel)
+        return channel
+
+    def get_member(self, user_id: int) -> MagicMock | None:
         return self.members.get(user_id)
 
     def get_channel(self, channel_id: int) -> MagicMock | None:
@@ -103,8 +136,8 @@ class FakeBot:
     def get_guild(self, guild_id: int) -> FakeGuild:
         return self.guild
 
-    async def fetch_user(self, user_id: int) -> SimpleNamespace:
-        return make_member(user_id, [])
+    async def fetch_user(self, user_id: int) -> MagicMock:
+        return make_user(user_id)
 
     def is_ready(self) -> bool:
         return True

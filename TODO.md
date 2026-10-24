@@ -62,17 +62,19 @@
 
 ## 5. 開單
 
-- [ ] 共用的開單流程：在開單者的鎖裡檢查上限（3 張）並建立資料，再建立頻道、權限覆寫、webhook、embed 與三個按鈕
-- [ ] Discord 的 Modal 送出後先 `defer`，完成後用 followup 回覆
-- [ ] 頻道名稱格式（只替換白名單變數）
-- [ ] 失敗時的復原（刪除頻道、標記為 failed）
-- [ ] Discord：在面板的下拉選單選擇分類後跳出 Modal（`bot/tickets/panel.py` 的 `CategorySelect.callback`），並把下拉選單恢復成未選擇
-- [ ] 網頁：`POST /tickets`
-- [ ] 開單者不在伺服器：照常開單，`on_member_join` 時加進頻道，scheduler 每 5 分鐘放入 `sync_pending_openers` 補檢查
+- [x] 共用的開單流程：在開單者的鎖裡檢查上限（3 張）並建立資料，再建立頻道、權限覆寫、webhook、embed 與三個按鈕
+- [x] Discord 的 Modal 送出後先 `defer`，完成後用 followup 回覆
+- [x] 頻道名稱格式（只替換白名單變數）
+- [x] 失敗時的復原（刪除頻道、標記為 failed）
+- [x] Discord：在面板的下拉選單選擇分類後跳出 Modal（`bot/tickets/panel.py` 的 `CategorySelect.callback`），並把下拉選單恢復成未選擇
+- [x] 網頁：`POST /tickets`
+- [x] 開單者不在伺服器：照常開單，`on_member_join` 時加進頻道，scheduler 每 5 分鐘放入 `sync_pending_openers` 補檢查
+- [x] 實際測試：`POST /tickets` 開單、worker 透過 REST API 把開單者加進頻道
+- [ ] 實際測試：在 Discord 上從面板開單（Modal、`defer`、下拉選單恢復成未選擇）
 
 ## 6. 客服單操作
 
-- [ ] persistent view（重啟後按鈕還能用）
+- [ ] 三個按鈕的功能（`bot/tickets/controls.py`，persistent view 已經在第 5 步註冊）
 - [ ] 接手（分類身份組、管理員）；釋放、轉交（目前接手的人、管理員）
 - [ ] 關閉（確認）、附原因關閉（Modal）
 - [ ] `/ticket add`、`/ticket remove`（對象不能是開單者或客服）、`/ticket transfer`、`/ticket close`
@@ -80,6 +82,7 @@
 - [ ] log 頻道通知
 - [ ] 修改權限身份組（`PUT /permission-roles`）時，同步更新開啟中客服單頻道的權限覆寫
 - [ ] 每個操作都寫入 `ticket_event`
+- [ ] 客服單頻道在 Discord 上被直接刪除時，把客服單標記為關閉（`on_guild_channel_delete`）
 
 ## 7. Discord → 網頁同步
 

@@ -39,7 +39,7 @@ bot/
 ├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command、啟動 API）、設定、Redis 與事件通知、權限、Cog 基底類別、CommandTree（錯誤處理）
 ├── api/             # HTTP API（FastAPI，跟 bot 在同一個程序）：routes、dependencies、CSRF
 ├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session
-├── tickets/         # 客服單的 Discord 介面與共用邏輯：面板、頻道名稱格式
+├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式
 ├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 migrations/          # Alembic migration
@@ -80,6 +80,7 @@ TODO.md
 - 會修改資料的請求要檢查 `Origin`，並且只接受 `application/json`。
 - 權限一律在 bot 端判斷，不能相信前端送來的身分或角色資料。
 - route 放在 `bot/api/routes/`，用 `bot/api/deps.py` 的 dependency 取得資料：`ViewerDep`（需要登入）、`AdminDep`（只有管理員）、`GuildDep`、`DBDep`、`RedisDep`。不要在 route 裡直接呼叫 `get_redis()` 等函式，測試才能替換。
+- 客服單的流程寫在 `bot/tickets/`，Discord 與 API 共用；要讓使用者看到的錯誤丟出 `bot.tickets.open.TicketError(訊息, status_code)`，API 轉成 HTTP 錯誤，Discord 回覆訊息。
 - 權限用 `viewer.access`（`bot.core.permissions.Access`）：`is_admin`、`is_staff(category_id)`。開單者的判斷是 `viewer.id == ticket.opener_id`。
 - request / response 的格式寫在 `bot/api/schemas.py`；Discord ID 的欄位用那裡的 `Snowflake` 型別（輸出時轉成字串）。
 
@@ -91,7 +92,7 @@ TODO.md
 - 附件儲存只依賴 S3 API，不可以使用特定服務商（例如 R2）專屬的功能。
 - Redis 的 key 一律加上 `ticket-bot:` 前綴（與主要 API 約定的 `session:`、`ticket_code:` 除外）；不要用 db 編號區分資料，pub/sub 不分 db。
 - queue 與鎖使用單一主節點的 Redis（`REDIS_URL`），不可以放在多主架構的 session store 上。
-- 工作寫在 `bot/worker/tasks.py`，用 `@broker.task` 定義；需要 Discord 時加上參數 `discord: DiscordClient`（只有 REST API，沒有快取）。
+- 工作寫在 `bot/worker/tasks.py`，用 `@broker.task` 定義；需要 Discord 時加上參數 `discord_client: DiscordClient`（只有 REST API，沒有快取；不要命名為 `discord`，會蓋掉 `discord` 模組）。
 - 失敗的工作會自動重試，間隔 1、2、4、8、16 分鐘，由 scheduler 放回 queue。不需要重試的錯誤要自己處理掉，不要丟出例外。
 - 工作執行超過 30 分鐘還沒結束，會被其他 worker 接手重新執行（`idle_timeout`）。可能超過的工作要先取得鎖，避免同時執行兩次。
 - worker 要通知 bot 時（例如推送 SSE），先寫入 `ticket_event`，再呼叫 `bot.core.redis.publish_event(event_id)`；bot 的 cog 用 `on_ticket_event(event_id)` 接收。

@@ -89,5 +89,5 @@ def _get_discord(state: Annotated[TaskiqState, TaskiqDepends()]) -> discord.Clie
     return client
 
 
-# 工作的參數：`discord: DiscordClient`
+# 工作的參數：`discord_client: DiscordClient`（不要叫 discord，會蓋掉 discord 模組）
 DiscordClient = Annotated[discord.Client, TaskiqDepends(_get_discord)]

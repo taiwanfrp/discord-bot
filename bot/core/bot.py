@@ -12,6 +12,7 @@ from bot.api.app import Server, create_server
 from bot.core.redis import listen_events
 from bot.core.tree import CommandTree
 from bot.db.engine import get_engine
+from bot.tickets.controls import TicketControlsView
 from bot.tickets.panel import PanelView
 from bot.worker.broker import broker
 
@@ -47,6 +48,7 @@ class Bot(commands.Bot):
 
         # persistent view：bot 重啟後，已經送出的面板還能使用
         self.add_view(PanelView())
+        self.add_view(TicketControlsView())
 
         for module in pkgutil.iter_modules(cogs.__path__, f"{cogs.__name__}."):
             await self.load_extension(module.name)

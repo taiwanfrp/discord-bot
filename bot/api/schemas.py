@@ -11,6 +11,7 @@ from pydantic import (
     model_validator,
 )
 
+from bot.db.models import Source, TicketStatus
 from bot.tickets.channel_name import validate_template
 
 # Discord ID 在 JSON 裡一律用字串（超過 JavaScript 的安全整數範圍）
@@ -179,3 +180,22 @@ class PanelPublishIn(BaseModel):
 class PanelOut(BaseModel):
     channel_id: Snowflake
     message_id: Snowflake
+
+
+class TicketIn(BaseModel):
+    category_id: int
+    subject: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class TicketOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    category_id: int
+    status: TicketStatus
+    source: Source
+    channel_id: Snowflake | None
+    opener_id: Snowflake
+    subject: str
+    created_at: datetime

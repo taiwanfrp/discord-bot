@@ -22,7 +22,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "fakeredis>=2.40.0",
+    "fakeredis[lua]>=2.40.0",
     "httpx>=0.28.1",
     "mypy>=2.4.0",
     "pre-commit>=4.7.0",
