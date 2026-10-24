@@ -424,10 +424,11 @@ ticket_message
 
 ticket_attachment
   id, ticket_id, message_id（網頁上傳時，送出訊息前是 null）, uploader_id
-  source（discord | web）, storage_key
+  source（discord | web）, discord_attachment_id（worker 用來重新取得 Discord 的下載網址）, storage_key
   filename, content_type, size
   status（pending | done | rejected | failed）, attempts
   share_token_hash（分享連結 token 的 SHA-256，只有網頁上傳的附件才有）, share_revoked_at
+  created_at
 
 ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
   id, ticket_id, type, actor_id（null 表示系統）, data（JSON）, created_at

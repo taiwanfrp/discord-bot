@@ -22,6 +22,8 @@ uv run ruff format                   # 格式化
 uv run mypy                          # 型別檢查（strict）
 uv run pytest                        # 測試
 uv run pre-commit run --all-files    # 跑全部 hook（只會檢查 git 已追蹤的檔案）
+uv run alembic upgrade head          # 套用 migration
+uv run alembic revision --autogenerate -m "add ..."   # 修改 models 後產生 migration（產生後要檢查內容）
 ```
 
 pre-commit：commit 時跑 ruff、mypy 與基本檢查，push 前跑 pytest。
@@ -32,7 +34,9 @@ pre-commit：commit 時跑 ruff、mypy 與基本檢查，push 前跑 pytest。
 main.py              # 入口：讀取設定並啟動 bot
 bot/
 ├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command）、設定、Cog 基底類別、CommandTree（錯誤處理）
+├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
+migrations/          # Alembic migration
 tests/
 docs/tickets.md      # 客服單系統設計
 docs/auth.md         # 身分驗證
@@ -52,10 +56,12 @@ TODO.md
 ## 資料庫規則（SQLite / MySQL、MariaDB / PostgreSQL 都要支援）
 
 - 使用 SQLAlchemy 2.0 async 與 Alembic；資料表結構的任何變更都必須寫 migration。
-- Discord ID（snowflake）一律用 `BigInteger`。
+- 開發時使用 SQLite（`data/bot.db`）。
+- Discord ID（snowflake）一律用 `BigInteger`，model 裡寫 `Mapped[Snowflake]`（`bot.db.base`）。
 - `String` 一定要指定長度；長文字用 `Text`。
-- Enum 使用 `native_enum=False`（存成字串）。
-- 時間一律以 UTC 儲存。
+- Enum 使用 `native_enum=False`（存成字串）。model 裡的 enum 繼承 `StrEnum`，會自動存成它的值。
+- 時間一律以 UTC 儲存。model 裡寫 `Mapped[datetime]` 會自動使用 `UTCDateTime`（只接受帶時區的 datetime），現在時間用 `bot.db.types.utcnow()`；不使用資料庫的 `now()` 預設值，因為各資料庫的時區行為不同。
+- 自增主鍵與外鍵用 `Integer`（SQLite 只有 `INTEGER PRIMARY KEY` 會自動遞增）。
 - MySQL / MariaDB 使用 `utf8mb4`。
 - MetaData 設定 `naming_convention`；Alembic 開啟 `render_as_batch=True`（SQLite 需要）。
 - 不使用任何單一資料庫專屬的語法或型別。

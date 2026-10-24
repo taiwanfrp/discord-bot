@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     discord_token: SecretStr
+    database_url: str
+    encryption_keys: SecretStr
 
 
 @lru_cache

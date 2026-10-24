@@ -19,13 +19,14 @@
 
 ## 1. 資料庫
 
-- [ ] 安裝 SQLAlchemy（async）、Alembic、aiosqlite、aiomysql、asyncpg
-- [ ] 建立 async engine 和 session，連線來自 `DATABASE_URL`
-- [ ] Base、`naming_convention`、UTC 時間型別
-- [ ] `EncryptedText` 型別（MultiFernet，金鑰來自 `ENCRYPTION_KEYS`）
-- [ ] models：settings、ticket_category、permission_role、ticket、ticket_user、ticket_member、ticket_message、ticket_attachment、ticket_event
-- [ ] Alembic（async 樣板、`render_as_batch=True`）與第一個 migration
-- [ ] 主要的索引（見 `docs/tickets.md` 第 13 節）
+- [x] 安裝 SQLAlchemy（async）、Alembic、aiosqlite、cryptography
+- [x] 建立 async engine 和 session，連線來自 `DATABASE_URL`
+- [x] Base、`naming_convention`、UTC 時間型別
+- [x] `EncryptedText` 型別（MultiFernet，金鑰來自 `ENCRYPTION_KEYS`）
+- [x] models：settings、ticket_category、permission_role、ticket、ticket_user、ticket_member、ticket_message、ticket_attachment、ticket_event
+- [x] Alembic（async 樣板、`render_as_batch=True`）與第一個 migration
+- [x] 主要的索引（見 `docs/tickets.md` 第 13 節）
+- [x] 安裝 aiomysql（MySQL、MariaDB）、asyncpg（PostgreSQL）
 - [ ] 用 docker compose 準備 MySQL、MariaDB、PostgreSQL、Redis、MinIO（本機測試 S3），三種資料庫都跑過 `alembic upgrade head` 和測試
 
 ## 2. Queue 與 worker
