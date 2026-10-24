@@ -70,7 +70,7 @@
 - [x] 網頁：`POST /tickets`
 - [x] 開單者不在伺服器：照常開單，`on_member_join` 時加進頻道，scheduler 每 5 分鐘放入 `sync_pending_openers` 補檢查
 - [x] 實際測試：`POST /tickets` 開單、worker 透過 REST API 把開單者加進頻道
-- [ ] 實際測試：在 Discord 上從面板開單（Modal、`defer`、下拉選單恢復成未選擇）
+- [x] 實際測試：在 Discord 上從面板開單（Modal、`defer`、下拉選單恢復成未選擇）
 
 ## 6. 客服單操作
 
