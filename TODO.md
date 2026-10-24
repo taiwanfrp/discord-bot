@@ -53,10 +53,12 @@
 
 ## 4. 設定 API
 
-- [ ] 設定：`GET`、`PATCH /settings`
-- [ ] 分類 CRUD
-- [ ] 身份組：在 Discord 建立、修改、刪除，以及設定用途（`permission_role`）
-- [ ] `POST /panel/publish`：發送或更新面板
+- [x] 設定：`GET`、`PATCH /settings`
+- [x] 分類 CRUD
+- [x] 身份組：在 Discord 建立、修改、刪除，以及設定用途（`permission_role`）
+- [x] `POST /panel/publish`：發送或更新面板（persistent view，沒有分類時停用下拉選單）
+- [x] 在 Discord 直接刪除身份組或頻道時，清掉資料庫裡指向它們的設定
+- [ ] 實際在 Discord 上測試：發布面板、建立與刪除身份組
 
 ## 5. 開單
 
@@ -64,7 +66,7 @@
 - [ ] Discord 的 Modal 送出後先 `defer`，完成後用 followup 回覆
 - [ ] 頻道名稱格式（只替換白名單變數）
 - [ ] 失敗時的復原（刪除頻道、標記為 failed）
-- [ ] Discord：面板的下拉選單（選項來自資料庫，沒有分類時停用）與 Modal
+- [ ] Discord：在面板的下拉選單選擇分類後跳出 Modal（`bot/tickets/panel.py` 的 `CategorySelect.callback`），並把下拉選單恢復成未選擇
 - [ ] 網頁：`POST /tickets`
 - [ ] 開單者不在伺服器：照常開單，`on_member_join` 時加進頻道，scheduler 每 5 分鐘放入 `sync_pending_openers` 補檢查
 
@@ -76,6 +78,7 @@
 - [ ] `/ticket add`、`/ticket remove`（對象不能是開單者或客服）、`/ticket transfer`、`/ticket close`
 - [ ] 對應的 API：claim、unclaim、transfer、close、members
 - [ ] log 頻道通知
+- [ ] 修改權限身份組（`PUT /permission-roles`）時，同步更新開啟中客服單頻道的權限覆寫
 - [ ] 每個操作都寫入 `ticket_event`
 
 ## 7. Discord → 網頁同步

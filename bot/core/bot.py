@@ -12,6 +12,7 @@ from bot.api.app import Server, create_server
 from bot.core.redis import listen_events
 from bot.core.tree import CommandTree
 from bot.db.engine import get_engine
+from bot.tickets.panel import PanelView
 from bot.worker.broker import broker
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,9 @@ class Bot(commands.Bot):
         self._events_task = asyncio.create_task(
             listen_events(lambda event_id: self.dispatch("ticket_event", event_id))
         )
+
+        # persistent view：bot 重啟後，已經送出的面板還能使用
+        self.add_view(PanelView())
 
         for module in pkgutil.iter_modules(cogs.__path__, f"{cogs.__name__}."):
             await self.load_extension(module.name)

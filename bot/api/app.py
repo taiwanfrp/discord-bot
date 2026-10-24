@@ -8,7 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from bot.api.csrf import CSRFMiddleware
 from bot.api.deps import BotDep, UserCache
-from bot.api.routes import auth, guild
+from bot.api.routes import auth, categories, guild, panel, permission_roles
+from bot.api.routes import settings as settings_routes
 from bot.core.config import get_settings
 
 
@@ -28,8 +29,8 @@ def create_app(bot: commands.Bot) -> FastAPI:
         allow_headers=["Content-Type", "Last-Event-ID"],
     )
 
-    app.include_router(auth.router)
-    app.include_router(guild.router)
+    for module in (auth, guild, settings_routes, categories, permission_roles, panel):
+        app.include_router(module.router)
 
     @app.get("/health")
     async def health(bot: BotDep) -> dict[str, bool]:

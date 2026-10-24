@@ -79,6 +79,8 @@ bot 只能建立、修改、指派**排在 bot 自己的身份組下面**的身�
 
 有 Discord「管理員」（Administrator）權限的成員也算管理員。這樣在還沒設定任何管理員身份組之前，伺服器的管理員也能從網頁做第一次設定。
 
+直接在 Discord 刪除身份組或頻道時，bot 會清掉資料庫裡指向它們的設定（權限身份組、log 頻道、預設類別、面板、分類的類別）。
+
 ### 4.2 權限表
 
 | 操作 | 開單者 | 額外加入的成員 | 分類身份組 | 管理員 |
@@ -111,7 +113,8 @@ flowchart TD
     modal -- 送出 --> flow
 ```
 
-- 面板的選項來自資料庫。網頁修改分類之後，呼叫 `POST /panel/publish` 讓 bot **編輯**現有的面板訊息，選項才會跟著更新。
+- 面板的選項來自資料庫，只顯示啟用中的分類（依照 `position` 排序，最多 25 個，這是 Discord 下拉選單的上限）。網頁修改分類之後，呼叫 `POST /panel/publish` 讓 bot **編輯**現有的面板訊息，選項才會跟著更新。
+- `POST /panel/publish` 帶要發布的頻道（`{"channel_id": "..."}`）。同一個頻道已經有面板時編輯它；換了頻道時送出新的面板，並刪除舊頻道裡的面板。
 - 沒有任何啟用中的分類時，面板顯示「目前沒有可用的分類」，並停用下拉選單。
 
 ### 5.2 從網頁開單
@@ -460,9 +463,9 @@ ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
 | 身分 | `GET /me`：Discord ID，以及是不是管理員、負責哪些分類 | 登入 |
 | Discord 資料 | `GET /guild/channels`、`GET /guild/roles` | 管理員 |
 | 身份組 | `POST /guild/roles`（在 Discord 建立）、`PATCH`、`DELETE /guild/roles/{role_id}` | 管理員 |
-| 權限身份組 | `GET`、`PUT /permission-roles` | 管理員 |
+| 權限身份組 | `GET`、`PUT /permission-roles`（整份取代：`admin_role_ids`、每個分類的 `role_ids`） | 管理員 |
 | 設定 | `GET`、`PATCH /settings` | 管理員 |
-| 分類 | `GET`、`POST /categories`，`PATCH`、`DELETE /categories/{category_id}` | 管理員（`GET` 登入就可以） |
+| 分類 | `GET`、`POST /categories`，`PATCH`、`DELETE /categories/{category_id}`（已經有客服單的分類不能刪除，回傳 `409`，只能停用） | 管理員（`GET` 登入就可以，但只看得到啟用中的分類） |
 | 面板 | `POST /panel/publish` | 管理員 |
 | 客服單 | `POST /tickets`（從網頁開單）、`GET /tickets`（篩選、分頁）、`GET /tickets/{id}` | 依照權限 |
 | 訊息 | `GET`、`POST /tickets/{id}/messages` | 依照權限 |

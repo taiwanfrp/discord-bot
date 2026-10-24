@@ -39,10 +39,11 @@ bot/
 ├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command、啟動 API）、設定、Redis 與事件通知、權限、Cog 基底類別、CommandTree（錯誤處理）
 ├── api/             # HTTP API（FastAPI，跟 bot 在同一個程序）：routes、dependencies、CSRF
 ├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session
+├── tickets/         # 客服單的 Discord 介面與共用邏輯：面板、頻道名稱格式
 ├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 migrations/          # Alembic migration
-tests/
+tests/               # tests/api/：API 測試（helpers.py 有假的 bot、伺服器與登入）
 docs/tickets.md      # 客服單系統設計
 docs/auth.md         # 身分驗證
 TODO.md
