@@ -58,7 +58,7 @@
 - [x] 身份組：在 Discord 建立、修改、刪除，以及設定用途（`permission_role`）
 - [x] `POST /panel/publish`：發送或更新面板（persistent view，沒有分類時停用下拉選單）
 - [x] 在 Discord 直接刪除身份組或頻道時，清掉資料庫裡指向它們的設定
-- [ ] 實際在 Discord 上測試：發布面板、建立與刪除身份組
+- [x] 實際在 Discord 上測試：發布面板、建立與刪除身份組
 
 ## 5. 開單
 
