@@ -54,7 +54,7 @@ class GuildSettings(Base):
     inactivity_close_after_hours: Mapped[int | None] = mapped_column(default=24)
     max_attachment_size: Mapped[int] = mapped_column(BigInteger, default=1024**3)
     # null 表示使用內建的預設類型
-    allowed_file_types: Mapped[list[str] | None] = mapped_column(JSON)
+    allowed_file_types: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True))
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
@@ -103,6 +103,8 @@ class Ticket(Base):
     channel_id: Mapped[Snowflake | None] = mapped_column(unique=True)
     webhook_id: Mapped[Snowflake | None]
     webhook_token: Mapped[str | None] = mapped_column(EncryptedText)
+    # 開單訊息（embed 與按鈕），接手、轉交時要更新它
+    opening_message_id: Mapped[Snowflake | None]
 
     opener_id: Mapped[Snowflake]
     # null 表示開單者還沒加進頻道
@@ -213,5 +215,5 @@ class TicketEvent(Base):
     type: Mapped[str] = mapped_column(String(64))
     # null 表示系統
     actor_id: Mapped[Snowflake | None]
-    data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    data: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

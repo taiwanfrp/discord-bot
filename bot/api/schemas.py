@@ -197,5 +197,17 @@ class TicketOut(BaseModel):
     source: Source
     channel_id: Snowflake | None
     opener_id: Snowflake
+    claimed_by_id: Snowflake | None
     subject: str
     created_at: datetime
+    closed_at: datetime | None
+    # null 表示系統自動關閉（關閉之後才有意義）
+    closed_by_id: Snowflake | None
+
+
+class UserIdIn(BaseModel):
+    user_id: Snowflake
+
+
+class CloseIn(BaseModel):
+    reason: str | None = Field(None, min_length=1, max_length=1000)

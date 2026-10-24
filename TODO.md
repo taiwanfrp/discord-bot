@@ -74,15 +74,17 @@
 
 ## 6. 客服單操作
 
-- [ ] 三個按鈕的功能（`bot/tickets/controls.py`，persistent view 已經在第 5 步註冊）
-- [ ] 接手（分類身份組、管理員）；釋放、轉交（目前接手的人、管理員）
-- [ ] 關閉（確認）、附原因關閉（Modal）
-- [ ] `/ticket add`、`/ticket remove`（對象不能是開單者或客服）、`/ticket transfer`、`/ticket close`
-- [ ] 對應的 API：claim、unclaim、transfer、close、members
-- [ ] log 頻道通知
-- [ ] 修改權限身份組（`PUT /permission-roles`）時，同步更新開啟中客服單頻道的權限覆寫
-- [ ] 每個操作都寫入 `ticket_event`
-- [ ] 客服單頻道在 Discord 上被直接刪除時，把客服單標記為關閉（`on_guild_channel_delete`）
+- [x] 三個按鈕的功能（`bot/tickets/controls.py`，persistent view 已經在第 5 步註冊）
+- [x] 接手（分類身份組、管理員）；釋放、轉交（目前接手的人、管理員）
+- [x] 關閉（確認）、附原因關閉（Modal）
+- [x] `/ticket add`、`/ticket remove`（對象不能是開單者或客服）、`/ticket transfer`、`/ticket close`
+- [x] 對應的 API：claim、unclaim、transfer、close、members
+- [x] log 頻道通知（開單、關單）
+- [x] 修改權限身份組（`PUT /permission-roles`）時，同步更新開啟中客服單頻道的權限覆寫（worker 的 `sync_ticket_permissions`）
+- [x] 每個操作都寫入 `ticket_event`
+- [x] 客服單頻道在 Discord 上被直接刪除時，把客服單標記為關閉（`on_guild_channel_delete`）
+- [x] 實際測試：API 的接手、釋放、附原因關單，worker 同步權限覆寫
+- [ ] 實際測試：在 Discord 上按按鈕（關閉的確認、附原因關閉的 Modal、接手與釋放）與 `/ticket` 指令
 
 ## 7. Discord → 網頁同步
 
@@ -101,7 +103,7 @@
 
 ## 9. 關單、紀錄與評分
 
-- [ ] 關單時撤銷這張單所有的分享連結
+- [x] 關單時撤銷這張單所有的分享連結（第 6 步的關單流程已經做了）
 - [ ] `send_close_notifications`：關單後私訊開單者（連結 + 評分）、接手的人（連結）
 - [ ] `GET /tickets`（篩選、分頁）、`GET /tickets/{id}`、`GET /tickets/{id}/messages`
 - [ ] `GET /attachments/{id}`（每次回傳新的 presigned URL，預設 10 分鐘）

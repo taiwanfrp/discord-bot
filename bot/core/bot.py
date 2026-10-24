@@ -48,7 +48,8 @@ class Bot(commands.Bot):
 
         # persistent view：bot 重啟後，已經送出的面板還能使用
         self.add_view(PanelView())
-        self.add_view(TicketControlsView())
+        # claimed=None：註冊所有按鈕（接手與釋放）
+        self.add_view(TicketControlsView(claimed=None))
 
         for module in pkgutil.iter_modules(cogs.__path__, f"{cogs.__name__}."):
             await self.load_extension(module.name)

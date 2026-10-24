@@ -39,6 +39,12 @@ def make_text_channel(channel_id: int, name: str = "general") -> MagicMock:
     channel.create_webhook = AsyncMock(return_value=SimpleNamespace(id=7, token="webhook-token"))
     channel.set_permissions = AsyncMock()
     channel.delete = AsyncMock()
+    # 開單訊息：fetch_message 取回後會被編輯
+    opening = MagicMock()
+    opening.embeds = [discord.Embed(title="開單").add_field(name="接手", value="尚未接手")]
+    opening.edit = AsyncMock()
+    channel.fetch_message = AsyncMock(return_value=opening)
+    channel.opening = opening
     partial = MagicMock()
     partial.edit = AsyncMock(side_effect=lambda **_: SimpleNamespace(id=partial.message_id))
     partial.delete = AsyncMock()
@@ -66,6 +72,7 @@ def _fill_user(user: MagicMock, user_id: int) -> MagicMock:
     user.name = "user"
     user.global_name = "User"
     user.mention = f"<@{user_id}>"
+    user.display_name = "user"
     user.bot = False
     user.avatar = SimpleNamespace(key="avatarhash", url="https://cdn.discordapp.com/a.png")
     user.display_avatar = user.avatar
@@ -156,11 +163,13 @@ class Env:
         self.guild = bot.guild
         self.sessions = sessions
         self.sessionmaker = sessionmaker
+        # sync_ticket_permissions.kiq 的 mock
+        self.sync_permissions = AsyncMock()
 
-    async def login_main_api(self, ttl: int = 100) -> str:
+    async def login_main_api(self, ttl: int = 100, user_id: int = USER_ID) -> str:
         """模擬主要 API：建立 session 與授權碼。"""
-        session_hash = hashlib.sha256(b"main-session").hexdigest()
-        await self.sessions.hset(f"session:{session_hash}", mapping={"discord_id": str(USER_ID)})
+        session_hash = hashlib.sha256(f"main-session-{user_id}".encode()).hexdigest()
+        await self.sessions.hset(f"session:{session_hash}", mapping={"discord_id": str(user_id)})
         await self.sessions.expire(f"session:{session_hash}", ttl)
         await self.sessions.set("ticket_code:code", session_hash, ex=30)
         return session_hash
@@ -168,14 +177,21 @@ class Env:
     async def exchange(self) -> Response:
         return await self.post("/auth/exchange", {"code": "code"})
 
-    async def login(self, *, admin: bool = False, role_ids: list[int] | None = None) -> None:
+    async def login(
+        self, *, admin: bool = False, role_ids: list[int] | None = None, user_id: int = USER_ID
+    ) -> None:
         """登入。admin、role_ids 都沒有指定時，是不在伺服器裡的使用者。"""
-        self.guild.members.pop(USER_ID, None)
+        self.guild.members.pop(user_id, None)
         if admin or role_ids is not None:
-            roles = (role_ids or []) + ([ADMIN_ROLE_ID] if admin else [])
-            self.guild.members[USER_ID] = make_member(USER_ID, roles)
-        await self.login_main_api()
+            self.add_member(user_id, (role_ids or []) + ([ADMIN_ROLE_ID] if admin else []))
+        await self.login_main_api(user_id=user_id)
         assert (await self.exchange()).status_code == 200
+
+    def add_member(self, user_id: int, role_ids: list[int]) -> MagicMock:
+        """讓使用者在伺服器裡（不登入）。"""
+        member = make_member(user_id, role_ids)
+        self.guild.members[user_id] = member
+        return member
 
     async def post(self, url: str, json: object) -> Response:
         return await self.client.post(url, json=json, headers={"Origin": ORIGIN})

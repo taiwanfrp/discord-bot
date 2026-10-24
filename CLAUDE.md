@@ -43,7 +43,7 @@ bot/
 ├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 migrations/          # Alembic migration
-tests/               # tests/api/：API 測試（helpers.py 有假的 bot、伺服器與登入）
+tests/               # tests/api/：API 測試（helpers.py 有假的 bot、伺服器與登入）；測試一律用 fakeredis，不可以連到真的 Redis
 docs/tickets.md      # 客服單系統設計
 docs/auth.md         # 身分驗證
 TODO.md
@@ -92,7 +92,7 @@ TODO.md
 - 附件儲存只依賴 S3 API，不可以使用特定服務商（例如 R2）專屬的功能。
 - Redis 的 key 一律加上 `ticket-bot:` 前綴（與主要 API 約定的 `session:`、`ticket_code:` 除外）；不要用 db 編號區分資料，pub/sub 不分 db。
 - queue 與鎖使用單一主節點的 Redis（`REDIS_URL`），不可以放在多主架構的 session store 上。
-- 工作寫在 `bot/worker/tasks.py`，用 `@broker.task` 定義；需要 Discord 時加上參數 `discord_client: DiscordClient`（只有 REST API，沒有快取；不要命名為 `discord`，會蓋掉 `discord` 模組）。
+- 工作寫在 `bot/worker/tasks.py`，用 `@broker.task` 定義；需要 Discord 時加上參數 `discord_client: discord.Client = DiscordDep`（`bot.worker.broker`，只有 REST API，沒有快取）。要用預設值的寫法，`.kiq()` 才不需要傳這個參數；不要命名為 `discord`，會蓋掉 `discord` 模組。
 - 失敗的工作會自動重試，間隔 1、2、4、8、16 分鐘，由 scheduler 放回 queue。不需要重試的錯誤要自己處理掉，不要丟出例外。
 - 工作執行超過 30 分鐘還沒結束，會被其他 worker 接手重新執行（`idle_timeout`）。可能超過的工作要先取得鎖，避免同時執行兩次。
 - worker 要通知 bot 時（例如推送 SSE），先寫入 `ticket_event`，再呼叫 `bot.core.redis.publish_event(event_id)`；bot 的 cog 用 `on_ticket_event(event_id)` 接收。

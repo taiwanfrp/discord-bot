@@ -1,10 +1,16 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import delete, select
+from taskiq.exceptions import SendTaskError
 
 from bot.api.deps import AdminDep, DBDep, GuildDep
 from bot.api.guild_utils import require_role
 from bot.api.schemas import CategoryRoles, PermissionRoles
 from bot.db.models import PermissionRole, RoleKind, TicketCategory
+from bot.worker.tasks import sync_ticket_permissions
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/permission-roles")
 
@@ -56,4 +62,9 @@ async def replace_permission_roles(
     await db.execute(delete(PermissionRole))
     db.add_all(rows)
     await db.commit()
+    try:
+        # 開啟中客服單頻道的權限覆寫，由 worker 在背景更新
+        await sync_ticket_permissions.kiq()
+    except SendTaskError:
+        log.exception("Failed to queue sync_ticket_permissions")
     return await load(db)

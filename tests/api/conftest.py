@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 from discord.ext import commands
@@ -14,11 +15,12 @@ from bot.core.redis import get_redis, get_session_redis
 from bot.db.base import Base
 from bot.db.engine import create_engine
 from bot.db.models import PermissionRole, RoleKind
+from bot.worker import tasks
 from tests.api.helpers import ADMIN_ROLE_ID, Env, FakeBot
 
 
 @pytest.fixture
-async def env(tmp_path: Path) -> AsyncIterator[Env]:
+async def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Env]:
     engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -39,7 +41,13 @@ async def env(tmp_path: Path) -> AsyncIterator[Env]:
     app.dependency_overrides[get_redis] = lambda: redis
     app.dependency_overrides[get_session_redis] = lambda: sessions
 
+    # 不真的放進 queue；測試可以檢查有沒有呼叫
+    sync_permissions = AsyncMock()
+    monkeypatch.setattr(tasks.sync_ticket_permissions, "kiq", sync_permissions)
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="https://bot.test") as client:
-        yield Env(client, bot, sessions, sessionmaker)
+        env = Env(client, bot, sessions, sessionmaker)
+        env.sync_permissions = sync_permissions
+        yield env
     await engine.dispose()

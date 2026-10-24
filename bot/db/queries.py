@@ -1,3 +1,6 @@
+from typing import Any, cast
+
+from sqlalchemy import CursorResult, Update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,3 +21,12 @@ async def get_guild_settings(session: AsyncSession) -> GuildSettings:
         await session.rollback()
         return await session.get_one(GuildSettings, 1)
     return settings
+
+
+async def execute_update(session: AsyncSession, statement: Update) -> int:
+    """執行 UPDATE，回傳更新的筆數。
+
+    搭配 WHERE 條件（例如 status 還是 open）使用，可以確保同時發生的兩個操作只有一個成功。
+    """
+    result = await session.execute(statement)
+    return cast(CursorResult[Any], result).rowcount

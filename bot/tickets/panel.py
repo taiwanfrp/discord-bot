@@ -7,7 +7,8 @@ from sqlalchemy import select
 from bot.core.redis import get_redis
 from bot.db.engine import get_sessionmaker
 from bot.db.models import Source, TicketCategory
-from bot.tickets.open import TicketError, open_ticket
+from bot.tickets.errors import TicketError
+from bot.tickets.open import open_ticket
 
 PANEL_CUSTOM_ID = "ticket:panel"
 # Discord 的下拉選單最多 25 個選項

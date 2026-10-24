@@ -54,13 +54,21 @@ async def test_open_as_member(env: Env) -> None:
     sent = channel.send.call_args.kwargs
     assert sent["content"] == f"<@{USER_ID}>"
     assert sent["embed"].title == f"#{body['id']} 無法連線"
-    assert [field.name for field in sent["embed"].fields] == ["分類", "開單者", "來源"]
+    assert [field.name for field in sent["embed"].fields] == ["分類", "開單者", "來源", "接手"]
+    assert sent["embed"].fields[-1].value == "尚未接手"
+    # 還沒有人接手：只有「接手」，沒有「釋放」
+    assert [item.custom_id for item in sent["view"].children] == [
+        "ticket:close",
+        "ticket:close_with_reason",
+        "ticket:claim",
+    ]
 
     async with env.sessionmaker() as db:
         ticket = await db.get_one(Ticket, body["id"])
         assert ticket.webhook_id == 7
         assert ticket.webhook_token == "webhook-token"
         assert ticket.opener_added_at is not None
+        assert ticket.opening_message_id == channel.id * 10
         raw = (await db.execute(text("SELECT webhook_token FROM ticket"))).scalar_one()
         assert raw != "webhook-token"
         snapshot = await db.get_one(TicketUser, (ticket.id, USER_ID))

@@ -4,49 +4,27 @@ import logging
 import discord
 from redis.asyncio import Redis
 from redis.exceptions import LockError, RedisError
-from sqlalchemy import Select, func, or_, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import (
     GuildSettings,
-    PermissionRole,
-    RoleKind,
     Source,
     Ticket,
     TicketCategory,
     TicketEvent,
     TicketStatus,
 )
-from bot.db.queries import get_guild_settings
+from bot.db.queries import execute_update, get_guild_settings
 from bot.db.types import utcnow
 from bot.tickets.channel_name import render_channel_name
-from bot.tickets.controls import TicketControlsView
+from bot.tickets.controls import TicketControlsView, claim_text
+from bot.tickets.errors import TicketError
+from bot.tickets.log import opened_log, send_log
+from bot.tickets.permissions import BOT_PERMISSIONS, MEMBER_PERMISSIONS, staff_role_ids
 from bot.tickets.snapshot import update_snapshot
 
 log = logging.getLogger(__name__)
-
-# 權限覆寫（docs/tickets.md 6.3）
-MEMBER_PERMISSIONS = discord.PermissionOverwrite(
-    view_channel=True, send_messages=True, attach_files=True, read_message_history=True
-)
-BOT_PERMISSIONS = discord.PermissionOverwrite(
-    view_channel=True,
-    send_messages=True,
-    embed_links=True,
-    read_message_history=True,
-    manage_channels=True,
-    manage_permissions=True,
-    manage_webhooks=True,
-)
-
-
-class TicketError(Exception):
-    """要讓使用者看到的錯誤（Discord 回覆訊息、API 回傳 status_code）。"""
-
-    def __init__(self, message: str, status_code: int = 409) -> None:
-        super().__init__(message)
-        self.message = message
-        self.status_code = status_code
 
 
 async def open_ticket(
@@ -103,12 +81,12 @@ async def open_ticket(
         await db.commit()
 
         banned = member is None and await is_banned(guild, opener)
-        await channel.send(
+        message = await channel.send(
             content=member.mention if member else None,
             embed=ticket_embed(
                 ticket, category, opener, in_guild=member is not None, banned=banned
             ),
-            view=TicketControlsView(),
+            view=TicketControlsView(claimed=False),
             allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
         )
     except Exception as error:
@@ -119,6 +97,10 @@ async def open_ticket(
         ticket.status = TicketStatus.FAILED
         await db.commit()
         raise TicketError("建立客服單頻道失敗，請稍後再試或聯絡管理員", 502) from error
+
+    ticket.opening_message_id = message.id
+    await db.commit()
+    await send_log(db, guild, opened_log(ticket, category.name))
     return ticket
 
 
@@ -181,19 +163,14 @@ async def build_overwrites(
     category: TicketCategory,
     member: discord.Member | None,
 ) -> dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite]:
-    rows = await db.scalars(
-        select(PermissionRole).where(
-            or_(PermissionRole.kind == RoleKind.ADMIN, PermissionRole.category_id == category.id)
-        )
-    )
     overwrites: dict[
         discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite
     ] = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         guild.me: BOT_PERMISSIONS,
     }
-    for row in rows:
-        role = guild.get_role(row.role_id)
+    for role_id in await staff_role_ids(db, category.id):
+        role = guild.get_role(role_id)
         if role is not None:
             overwrites[role] = MEMBER_PERMISSIONS
     if member is not None:
@@ -229,6 +206,7 @@ def ticket_embed(
     embed.add_field(name="分類", value=category.name)
     embed.add_field(name="開單者", value=f"{opener.mention}（{opener.name}）")
     embed.add_field(name="來源", value="Discord" if ticket.source is Source.DISCORD else "網頁")
+    embed.add_field(name="接手", value=claim_text(ticket.claimed_by_id))
     if not in_guild:
         note = "開單者目前不在伺服器內" + ("，而且已被停權" if banned else "")
         embed.add_field(
@@ -251,12 +229,13 @@ async def add_opener(
     await channel.set_permissions(
         member, overwrite=MEMBER_PERMISSIONS, reason=f"客服單 #{ticket.id} 的開單者加入伺服器"
     )
-    result = await db.execute(
+    updated = await execute_update(
+        db,
         update(Ticket)
         .where(Ticket.id == ticket.id, Ticket.opener_added_at.is_(None))
-        .values(opener_added_at=utcnow())
+        .values(opener_added_at=utcnow()),
     )
-    if result.rowcount == 0:  # type: ignore[attr-defined]
+    if not updated:
         await db.rollback()
         return None
     await update_snapshot(db, ticket.id, member)

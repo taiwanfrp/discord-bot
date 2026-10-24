@@ -95,7 +95,7 @@ bot 只能建立、修改、指派**排在 bot 自己的身份組下面**的身�
 
 - **加入、移除成員的對象不能是開單者或客服**（有該分類身份組或管理員身份組的人）。開單者不能被移除；客服本來就能透過身份組看到頻道，不需要另外加入。
 - **接手**：已經有人接手的客服單不能直接搶過來，要由目前接手的人或管理員轉交。
-- **轉交**：只能轉給有該分類身份組或管理員身份組的人，**不能換分類**。
+- **轉交**：只能轉給有該分類身份組或管理員身份組的人，**不能換分類**。管理員也可以把還沒有人接手的單直接指派給某個客服。
 - 網頁上看得到的客服單範圍，跟 Discord 上的權限相同。bot 從伺服器成員快取讀取使用者的身份組來判斷。
 - 每個人**同時最多開 3 張**客服單（可以在網頁修改）。
 
@@ -188,6 +188,8 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
 | 釋放（接手後才出現） | 清除接手的人，按鈕改回「接手」 | 目前接手的人、管理員 |
 
 - 使用 persistent view：`timeout=None` 加上固定的 `custom_id`，並在 `setup_hook` 裡註冊，bot 重啟後按鈕還能使用。客服單頻道裡的按鈕（包括閒置提醒的「立即關閉」），按下時用 `channel_id` 查出是哪一張客服單。
+- 按鈕或指令造成的變更（接手、釋放、轉交、加入與移除成員）都會在頻道裡送出一則說明；加入成員與轉交會通知對方。
+- 客服單頻道在 Discord 上被直接刪除時，客服單會被標記為關閉，關閉者是系統。
 - **私訊裡的評分按鈕不在客服單頻道裡**，無法用 `channel_id` 查詢，而且頻道也已經刪除了。所以評分按鈕要把客服單 id 放進 `custom_id`（例如 `ticket:rate:12`），使用 discord.py 的 `DynamicItem` 解析，bot 重啟後一樣能使用。
 - slash command：`/ticket add`、`/ticket remove`（加入、移除成員）、`/ticket transfer`（轉交）、`/ticket close [reason]`。
 
@@ -306,7 +308,7 @@ GET /a/<attachment_id>/<token>
 ## 10. 關單、紀錄與評分
 
 1. 更新 `status=closed`、`closed_at`、`closed_by_id`、`close_reason`（自動關閉時記錄為系統）。
-2. 送出 SSE 事件 `ticket.closed`，並在 log 頻道送出通知（如果有設定）。
+2. 送出 SSE 事件 `ticket.closed`，並在 log 頻道送出通知（如果有設定；開單時也會通知）。
 3. 刪除頻道，webhook 會跟著被刪除。同時**撤銷這張客服單所有的分享連結**（設定 `share_revoked_at`）：頻道刪除後已經沒有人需要它們，就算連結事先被複製出去，關單後也打不開。紀錄頁面不受影響，網頁看附件是用需要登入的 `GET /attachments/{attachment_id}`。
 4. worker 送出私訊：
    - **開單者**：紀錄頁面的連結 + 「評分」按鈕。
@@ -347,6 +349,7 @@ GET /a/<attachment_id>/<token>
 | `send_close_notifications(ticket_id)`：關單後的私訊（連結、評分） | 關單的流程（bot 或 worker） |
 | `check_inactive_tickets()`：閒置提醒、自動關閉 | scheduler（每 5 分鐘） |
 | `sync_pending_openers()`：把已經加入伺服器的開單者加進頻道（補 `on_member_join` 錯過的事件） | scheduler（每 5 分鐘） |
+| `sync_ticket_permissions()`：讓開啟中客服單頻道的身份組權限覆寫，跟權限身份組的設定一致 | bot（API 修改權限身份組後） |
 
 ### 11.2 可靠性規則
 
@@ -404,7 +407,7 @@ permission_role
 
 ticket
   id（自增，也用在頻道名稱）, category_id, status（open | closed | failed）, source（discord | web）
-  channel_id, webhook_id, 🔒webhook_token
+  channel_id, webhook_id, 🔒webhook_token, opening_message_id（開單訊息，接手、轉交時更新它的 embed 與按鈕）
   opener_id, opener_added_at（null 表示開單者還沒加進頻道）, 🔒subject, 🔒content
   claimed_by_id, claimed_at
   last_message_at, inactivity_reminded_at, created_at
