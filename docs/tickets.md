@@ -224,7 +224,7 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
 
 ### 8.4 S3 相容儲存
 
-- 只依賴 S3 API，Cloudflare R2、AWS S3、MinIO 等都可以使用。端點與憑證都由環境變數設定。
+- 只依賴 S3 API，Cloudflare R2、AWS S3、Silo（MinIO 的社群分支）等都可以使用。端點與憑證都由環境變數設定。
 - 使用 **private bucket**，因為客服單裡可能有敏感的截圖。bucket 不公開，所有存取都透過 presigned URL。
 - 物件 key：附件是 `tickets/{ticket_id}/{attachment_id}/{filename}`，頭像是 `avatars/{user_id}/{avatar_hash}.{副檔名}`（8.6）。檔名由使用者決定，要先清理（移除路徑分隔符號、控制字元，並限制長度）；原始檔名另外存在資料庫，下載時用 `Content-Disposition` 還原。
 - bot 使用的 S3 金鑰只能存取這個 bucket。
@@ -327,7 +327,7 @@ GET /a/<attachment_id>/<token>
   - Redis Cluster 只支援 db 0。
   - **pub/sub 不分 db**：不同 db 裡的程式，訂閱同名的頻道會互相收到訊息。
   - Redis ACL 的權限是依照 key 的前綴設定，跟 db 無關。
-- 每個服務各自使用自己的 queue 名稱與 key 前綴（這個 bot 是 `ticket-bot:`），並用 ACL 限制只能存取自己的前綴。
+- 每個服務各自使用自己的 queue 名稱與 key 前綴（這個 bot 是 `ticket-bot:`），並用 ACL 限制只能存取自己的前綴。唯一的例外是 taskiq-redis 內部用來當作鎖的 `autoclaim:ticket-bot:worker:ticket-bot:queue`，ACL 要一併允許。
 - 之後如果有**不是 Python** 的服務要使用 queue，該服務與 bot 之間的工作改用自己定義、有文件的 JSON 格式（例如 `{"type": "send_dm", ...}`），不要讓其他語言去模仿 taskiq 的內部格式。
 - **queue 要放在單一主節點的 Redis**，不要放在多主架構的 session store 上。多主架構的複製是非同步的，兩個節點可能同時把同一個工作交給不同的 worker，鎖（Redis lock）也會失效。
 
@@ -348,7 +348,9 @@ GET /a/<attachment_id>/<token>
 - **資料庫才是唯一的真實狀態**。工作只帶 id（例如 `attachment_id`），worker 執行時再從資料庫讀取最新的資料。
 - **每個工作都必須冪等**：執行兩次的結果跟一次一樣。例如送出前先檢查 `delivery_status` 是不是已經 `sent`。
 - **使用支援 ack 的 broker**（taskiq-redis 的 Redis Streams broker），確保 worker 中途被停止時，工作會重新被取出，而不是遺失。
-- 失敗時使用指數退避重試，超過次數上限就標記為 `failed` 並記錄。
+  - 工作執行完才 ack。超過 30 分鐘沒有 ack 的工作（例如 worker 當機），會被其他 worker 接手重新執行，所以這個時間要比最長的工作還長；可能超過的工作要先取得鎖，避免同時執行兩次。
+  - worker 一次只從 queue 取一個工作。已經取出但還沒開始執行的工作，在 worker 停止後也要等 30 分鐘才會被接手。
+- 失敗時使用指數退避重試：間隔 1、2、4、8、16 分鐘，最多執行 6 次。重試是先存進 Redis（`ticket-bot:schedule:`），時間到了由 scheduler 放回 queue，所以 scheduler 停止期間不會重試，重新啟動後會補上。超過次數上限就標記為 `failed` 並記錄。
 
 ### 11.3 部署
 

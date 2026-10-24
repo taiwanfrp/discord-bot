@@ -27,16 +27,16 @@
 - [x] Alembic（async 樣板、`render_as_batch=True`）與第一個 migration
 - [x] 主要的索引（見 `docs/tickets.md` 第 13 節）
 - [x] 安裝 aiomysql（MySQL、MariaDB）、asyncpg（PostgreSQL）
-- [ ] 用 docker compose 準備 MySQL、MariaDB、PostgreSQL、Redis、MinIO（本機測試 S3），三種資料庫都跑過 `alembic upgrade head` 和測試
+- [ ] 用 docker compose 準備 MySQL、MariaDB、PostgreSQL、Redis、Silo（`pgsty/silo`，MinIO 的社群分支，本機測試 S3），三種資料庫都跑過 `alembic upgrade head` 和測試
 
 ## 2. Queue 與 worker
 
-- [ ] taskiq + Redis Streams broker（支援 ack），queue 名稱與 key 前綴 `ticket-bot:`
-- [ ] worker 服務：只使用 Discord REST API，不連 Discord gateway
-- [ ] scheduler 服務
-- [ ] 重試（指數退避）與次數上限
-- [ ] 優雅關閉：收到 `SIGTERM` 時停止接新工作，等目前的工作完成
-- [ ] worker → bot 的事件通知（Redis pub/sub）
+- [x] taskiq + Redis Streams broker（支援 ack），queue 名稱與 key 前綴 `ticket-bot:`
+- [x] worker 服務：只使用 Discord REST API，不連 Discord gateway
+- [x] scheduler 服務
+- [x] 重試（指數退避）與次數上限
+- [x] 優雅關閉：收到 `SIGTERM` 時停止接新工作，等目前的工作完成
+- [x] worker → bot 的事件通知（Redis pub/sub）
 
 ## 3. API 基礎
 

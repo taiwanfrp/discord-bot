@@ -16,7 +16,10 @@ TaiwanFRP 的 Discord bot，只服務單一伺服器。主要功能是客服單�
 
 ```bash
 uv sync                              # 安裝依賴
+docker compose up -d                 # 本機開發用的 Redis
 uv run main.py                       # 啟動 bot
+uv run taskiq worker bot.worker.broker:broker bot.worker.tasks --workers 1   # 啟動 worker
+uv run taskiq scheduler bot.worker.scheduler:scheduler bot.worker.tasks     # 啟動 scheduler（重試也靠它）
 uv run ruff check --fix              # lint（含 import 排序）
 uv run ruff format                   # 格式化
 uv run mypy                          # 型別檢查（strict）
@@ -33,8 +36,9 @@ pre-commit：commit 時跑 ruff、mypy 與基本檢查，push 前跑 pytest。
 ```
 main.py              # 入口：讀取設定並啟動 bot
 bot/
-├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command）、設定、Cog 基底類別、CommandTree（錯誤處理）
+├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command）、設定、Redis 與事件通知、Cog 基底類別、CommandTree（錯誤處理）
 ├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session
+├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 migrations/          # Alembic migration
 tests/
@@ -82,3 +86,8 @@ TODO.md
 - 附件儲存只依賴 S3 API，不可以使用特定服務商（例如 R2）專屬的功能。
 - Redis 的 key 一律加上 `ticket-bot:` 前綴（與主要 API 約定的 `session:`、`ticket_code:` 除外）；不要用 db 編號區分資料，pub/sub 不分 db。
 - queue 與鎖使用單一主節點的 Redis（`REDIS_URL`），不可以放在多主架構的 session store 上。
+- 工作寫在 `bot/worker/tasks.py`，用 `@broker.task` 定義；需要 Discord 時加上參數 `discord: DiscordClient`（只有 REST API，沒有快取）。
+- 失敗的工作會自動重試，間隔 1、2、4、8、16 分鐘，由 scheduler 放回 queue。不需要重試的錯誤要自己處理掉，不要丟出例外。
+- 工作執行超過 30 分鐘還沒結束，會被其他 worker 接手重新執行（`idle_timeout`）。可能超過的工作要先取得鎖，避免同時執行兩次。
+- worker 要通知 bot 時（例如推送 SSE），先寫入 `ticket_event`，再呼叫 `bot.core.redis.publish_event(event_id)`；bot 的 cog 用 `on_ticket_event(event_id)` 接收。
+- 例外的 key：taskiq-redis 會使用 `autoclaim:ticket-bot:worker:ticket-bot:queue` 當作鎖，設定 Redis ACL 時要一併允許。

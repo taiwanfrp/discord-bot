@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     discord_token: SecretStr
     database_url: str
+    redis_url: str
     encryption_keys: SecretStr
 
 
