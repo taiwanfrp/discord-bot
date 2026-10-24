@@ -17,7 +17,13 @@ EVENTS_CHANNEL = "ticket-bot:events"
 @lru_cache
 def get_redis() -> Redis:
     # health_check_interval：pub/sub 長時間沒有訊息時，也能發現連線已經中斷
-    return Redis.from_url(get_settings().redis_url, health_check_interval=30)
+    return Redis.from_url(get_settings().redis_url, decode_responses=True, health_check_interval=30)
+
+
+@lru_cache
+def get_session_redis() -> Redis:
+    """主要 API 的 session store，只能讀取 session、讀取並刪除授權碼（docs/auth.md 4.5）。"""
+    return Redis.from_url(get_settings().session_redis_url, decode_responses=True)
 
 
 async def publish_event(event_id: int) -> None:

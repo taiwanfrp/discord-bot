@@ -36,7 +36,8 @@ pre-commit：commit 時跑 ruff、mypy 與基本檢查，push 前跑 pytest。
 ```
 main.py              # 入口：讀取設定並啟動 bot
 bot/
-├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command）、設定、Redis 與事件通知、Cog 基底類別、CommandTree（錯誤處理）
+├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command、啟動 API）、設定、Redis 與事件通知、權限、Cog 基底類別、CommandTree（錯誤處理）
+├── api/             # HTTP API（FastAPI，跟 bot 在同一個程序）：routes、dependencies、CSRF
 ├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session
 ├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
@@ -77,6 +78,9 @@ TODO.md
 - Discord ID 在 JSON 裡一律用字串（snowflake 超過 JavaScript 的安全整數範圍）。
 - 會修改資料的請求要檢查 `Origin`，並且只接受 `application/json`。
 - 權限一律在 bot 端判斷，不能相信前端送來的身分或角色資料。
+- route 放在 `bot/api/routes/`，用 `bot/api/deps.py` 的 dependency 取得資料：`ViewerDep`（需要登入）、`AdminDep`（只有管理員）、`GuildDep`、`DBDep`、`RedisDep`。不要在 route 裡直接呼叫 `get_redis()` 等函式，測試才能替換。
+- 權限用 `viewer.access`（`bot.core.permissions.Access`）：`is_admin`、`is_staff(category_id)`。開單者的判斷是 `viewer.id == ticket.opener_id`。
+- request / response 的格式寫在 `bot/api/schemas.py`；Discord ID 的欄位用那裡的 `Snowflake` 型別（輸出時轉成字串）。
 
 ## 背景工作規則
 

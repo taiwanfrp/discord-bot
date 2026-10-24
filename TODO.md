@@ -40,14 +40,14 @@
 
 ## 3. API 基礎
 
-- [ ] 在 bot 的 event loop 裡啟動 FastAPI（uvicorn）
-- [ ] uvicorn 的 `--proxy-headers`、`--forwarded-allow-ips`（只信任自己的 proxy）
-- [ ] CORS 白名單、檢查 `Origin`、只接受 JSON
-- [ ] `POST /auth/exchange`：用 `GETDEL` 兌換授權碼，產生 ticket session 並回傳 `__Host-` cookie；`POST /auth/logout`（見 `docs/auth.md`）
-- [ ] 每個請求的驗證：ticket session → 主要 API 的 session → Discord ID，查詢失敗回傳 503
-- [ ] 權限判斷（管理員、分類身份組、開單者），從伺服器成員快取讀取身份組；不在伺服器裡的使用者改用 REST API 取得資料，只能存取自己的客服單
-- [ ] `GET /health`、`GET /me`
-- [ ] `GET /guild/channels`、`GET /guild/roles`
+- [x] 在 bot 的 event loop 裡啟動 FastAPI（uvicorn）；收到 `SIGTERM` 時正常關閉
+- [x] uvicorn 的 `--proxy-headers`、`--forwarded-allow-ips`（只信任自己的 proxy）
+- [x] CORS 白名單、檢查 `Origin`、只接受 JSON
+- [x] `POST /auth/exchange`：用 `GETDEL` 兌換授權碼，產生 ticket session 並回傳 `__Host-` cookie；`POST /auth/logout`（見 `docs/auth.md`）
+- [x] 每個請求的驗證：ticket session → 主要 API 的 session → Discord ID，查詢失敗回傳 503
+- [x] 權限判斷（管理員、分類身份組），從伺服器成員快取讀取身份組；不在伺服器裡的使用者改用 REST API 取得資料，只能存取自己的客服單（開單者的判斷在客服單的 API 裡做）
+- [x] `GET /health`、`GET /me`
+- [x] `GET /guild/channels`、`GET /guild/roles`
 - [ ] 主要 API 依照 `docs/auth.md` 第 5 節實作：`__Host-session` cookie、session 的格式、`POST /auth/ticket-code`（不在這個 repo）
 - [ ] session store 的專用 ACL 帳號（只能讀取 session、讀取並刪除授權碼）
 

@@ -38,7 +38,7 @@ sequenceDiagram
     S-->>B: session 的雜湊（只能取出一次）
     B->>S: TTL session:{雜湊}
     S-->>B: 剩餘秒數（不存在就回傳 401）
-    B->>R: HSET ticket-bot:ticket_session:{ticket session} api_session_hash … created_at …
+    B->>R: HSET ticket-bot:ticket_session:{ticket session 的雜湊} api_session_hash … created_at …
     B-->>F: Set-Cookie（只屬於 bot 的網域）＋ 使用者資料（同 GET /me）
 ```
 
@@ -52,7 +52,7 @@ sequenceDiagram
     participant S as session store
 
     Br->>B: 請求（帶 bot 的 cookie）
-    B->>R: HGET ticket-bot:ticket_session:{cookie} api_session_hash
+    B->>R: HGET ticket-bot:ticket_session:{cookie 的雜湊} api_session_hash
     alt 查不到
         B-->>Br: 401
     end
@@ -121,9 +121,11 @@ bot 產生**新的**隨機字串，連結到主要 API 的 session，而不是�
 - 格式：**key 是 ticket session，value 才放主要 API 的 session**。使用 Redis hash：
 
   ```
-  HSET ticket-bot:ticket_session:<ticket session> api_session_hash <主要 API session 的雜湊> created_at <ISO 8601 時間>
-  EXPIRE ticket-bot:ticket_session:<ticket session> <秒數>
+  HSET ticket-bot:ticket_session:<sha256(ticket session) 的 hex> api_session_hash <主要 API session 的雜湊> created_at <ISO 8601 時間>
+  EXPIRE ticket-bot:ticket_session:<sha256(ticket session) 的 hex> <秒數>
   ```
+
+  key 用 ticket session 的 **SHA-256 雜湊**，跟主要 API 的 `session:` 一樣，不存原始的值：bot 的 Redis 外洩時，也拿不到能用的 cookie。
 
   不能把兩個值都放進 key（例如 `ticket_session:<ticket session>:<主要 API 的 session>`）：bot 收到請求時手上只有 ticket session，要用完整的 key 才能直接查詢。如果 key 裡還有主要 API 的 session，就只能用 `SCAN` 逐一比對所有 key，資料越多越慢。key 是「用來查詢的東西」，value 才是「查到的資料」。
 - 用 hash 而不是單純的字串，是為了之後可以再加欄位（例如建立時的 IP）。
