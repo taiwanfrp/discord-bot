@@ -14,8 +14,8 @@
 
 ## 0. 架構整理
 
-- [ ] 把 `Bot` 從 `main.py` 搬到 `bot/core/bot.py`
-- [ ] 設定改用 pydantic-settings（`bot/core/config.py`），並更新 `.env.example`（環境變數見 `docs/tickets.md` 第 16 節與 `docs/auth.md` 第 11 節）
+- [x] 把 `Bot` 從 `main.py` 搬到 `bot/core/bot.py`
+- [x] 設定改用 pydantic-settings（`bot/core/config.py`）；其他環境變數等到用到的步驟再加進 `Settings` 與 `.env.example`（見 `docs/tickets.md` 第 16 節與 `docs/auth.md` 第 11 節）
 
 ## 1. 資料庫
 

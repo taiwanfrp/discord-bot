@@ -29,9 +29,9 @@ pre-commit：commit 時跑 ruff、mypy 與基本檢查，push 前跑 pytest。
 ## 專案結構
 
 ```
-main.py              # 入口：Bot 類別、自動載入 cogs、全域同步 slash command
+main.py              # 入口：讀取設定並啟動 bot
 bot/
-├── core/            # 共用程式碼：Cog 基底類別、CommandTree（錯誤處理）
+├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command）、設定、Cog 基底類別、CommandTree（錯誤處理）
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 tests/
 docs/tickets.md      # 客服單系統設計
@@ -47,7 +47,7 @@ TODO.md
 - cog 繼承 `bot.core.cog.Cog`（已提供 `self.bot`）。
 - 要讓使用者看到的錯誤，丟出 `bot.core.tree.UserFacingError("訊息")`；其餘未預期的錯誤由 `CommandTree.on_error` 統一記錄並回覆。
 - 使用 `logging.getLogger(__name__)`，不要用 `print`。
-- 設定一律來自環境變數或 `.env`，不要寫死在程式裡；`.env` 不可 commit，新增設定時同步更新 `.env.example`。
+- 設定一律來自環境變數或 `.env`，透過 `bot.core.config.get_settings()` 讀取，不要寫死在程式裡；`.env` 不可 commit，新增設定時同步更新 `Settings` 與 `.env.example`。
 
 ## 資料庫規則（SQLite / MySQL、MariaDB / PostgreSQL 都要支援）
 
