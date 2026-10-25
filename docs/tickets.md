@@ -217,16 +217,32 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
 
 ### 8.2 網頁 → Discord
 
-1. 附件：前端呼叫 `POST /tickets/{id}/attachments` 取得上傳網址，**直接上傳到 S3，不經過 bot**。大檔案使用 multipart upload。
-2. `POST /tickets/{id}/messages`，內容包含文字和附件 id。
-3. bot 加密後寫入 `ticket_message`（`source=web`、`delivery_status=pending`），更新作者的快照（8.6）與 `ticket.last_message_at`，並放入 worker 工作。
+1. **上傳附件**：瀏覽器用 presigned URL **直接上傳到 S3，不經過 bot**。
+   1. `POST /tickets/{id}/attachments`（檔名、大小）：bot 先檢查副檔名與大小（8.3），回傳上傳的方式：
+      - 不超過 8 MiB：一個上傳網址，瀏覽器直接 `PUT` 整個檔案。
+      - 超過：multipart upload。每一塊都是 8 MiB（只有最後一塊比較小），用 `POST /attachments/{id}/parts` 取得每一塊的上傳網址。網址有期限（`S3_PRESIGN_TTL`），所以前端在上傳之前才分批取得，一次最多 100 塊。
+      - 網址的簽章包含檔案（或每一塊）的大小，上傳的大小不同時 S3 會拒絕。
+   2. 上傳完呼叫 `POST /attachments/{id}/complete`。multipart upload 由 bot 用 ListParts 確認每一塊都上傳了、大小正確，再合併成一個檔案；瀏覽器不需要讀取每一塊的 ETag。
+   3. bot 放入 `verify_attachment`，worker 檢查檔案內容（8.3），結果用 SSE 的 `attachment.updated` 通知。
+   - 還沒送出的附件可以用 `DELETE /attachments/{id}` 移除。同一個人在同一張單裡，最多同時有 10 個還沒送出的附件。
+   - 上傳後 24 小時還沒送出的附件（例如使用者關掉網頁），由 scheduler 每小時放入的 `delete_unsent_attachments` 刪除。
+   - 申請網址以外的操作，只有上傳的人自己可以做。
+2. `POST /tickets/{id}/messages`：文字（最多 2000 字）和附件 id（最多 10 個）。附件要是自己在這張單上傳完成、還沒送出的；還在檢查中的也可以，訊息會等它檢查完再送出。
+3. bot 加密後寫入 `ticket_message`（`source=web`、`delivery_status=pending`），更新作者的快照（8.6）與 `ticket.last_message_at`，並放入 `deliver_messages(ticket_id)`。
 4. worker 用這個頻道的 webhook 送出訊息，名稱和頭像使用該使用者的 Discord 名稱和頭像。**附件以分享連結（8.4.1）的形式附在訊息裡**，不上傳到 Discord，所以不受 Discord 的上傳大小限制；Discord 會自己抓取連結，顯示圖片預覽。
-5. 送出成功：存下 `discord_message_id`，狀態改成 `sent`。失敗：由 worker 重試。
+   - 每個附件一行：`📎 [檔名](分享連結)`。沒有通過檢查的附件只顯示檔名與原因。
+   - 文字加上附件連結不能超過 Discord 的 2000 字上限，超過時 API 回傳 `422`，請使用者縮短內容或分開送出。
+   - 訊息裡的 `@everyone`、`<@id>` 只顯示，不會通知任何人。
+   - Discord 不接受含有 `discord`、`clyde` 的 webhook 名稱，bot 在中間插入間隔號（例如 `Di·scord`）。實測零寬空白、外觀相似的字母（例如西里爾字母 `о`）、全形字母都會被 Discord 當成同一個字。Discord 還是不接受的話，改用「網頁使用者」。
+   - 沒有自訂頭像的人使用 Discord 的預設頭像。
+   - webhook 被刪除的話（例如管理員在頻道設定裡刪掉），建立新的 webhook 再送一次。
+5. 送出成功：存下 `discord_message_id`，狀態改成 `sent`。失敗：由 worker 重試；最後一次重試也失敗，或是 Discord 回傳 `400`（內容有問題，重試也一樣），就標記為 `failed`，繼續送下一則。客服單已經關閉、頻道已經刪除時也標記為 `failed`。狀態改變時送出 SSE 事件 `message.updated`。
 6. **同一張客服單的訊息必須依照順序送出**：工作的參數是**客服單**，不是單一訊息（`deliver_messages(ticket_id)`）。worker 執行時：
-   1. 取得這張客服單的鎖（Redis lock），同一時間只有一個 worker 處理這張單。
+   1. 取得這張客服單的鎖（Redis lock），同一時間只有一個 worker 處理這張單。另一個 worker 正在送的話，最多等 30 秒，還是取不到就丟出例外，稍後重試。
    2. 依照 id 順序，找出這張單所有 `delivery_status=pending` 的訊息，一則一則送出。
-   3. 遇到附件還在檢查中的訊息，就停下來稍後重試，後面的訊息也不會插隊。
+   3. 遇到附件還在檢查中的訊息，就停下來，後面的訊息也不會插隊。附件檢查完之後，`verify_attachment` 會再放入 `deliver_messages`。
    - 使用者連續送出三則訊息時，第一個工作就會依序送完三則；後面兩個工作發現沒有待送的訊息，直接結束。已經是 `sent` 的訊息不會重送。
+   - 送出成功、但寫入資料庫之前 worker 中斷的話，重試時會再送一次。Discord 的 webhook 沒有防止重複送出的機制。
 
 ### 8.3 附件規則
 
@@ -236,7 +252,8 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
     - 純文字（txt、csv 等）沒有 magic bytes，偵測不到類型時只依照副檔名。
     - 同一種容器格式不一定分得出來（例如 docx 可能被偵測成 zip）。偵測到的類型跟副檔名屬於同一組（zip、Office、OpenDocument；或舊版的 doc、xls、ppt），而且副檔名被允許時就接受。
   - Discord → S3：下載時就讀取開頭檢查，不符合的不上傳，記錄為 `rejected`。
-  - 網頁 → S3：申請上傳網址時先檢查副檔名與大小；上傳完成後，worker 讀取物件開頭的幾個 bytes 再檢查一次，不符合就刪除並標記為 `rejected`。
+  - 網頁 → S3：申請上傳網址時先檢查副檔名與大小；上傳完成後，worker 確認實際的大小，並讀取開頭的 8192 bytes 再檢查一次，不符合就刪除並標記為 `rejected`。
+  - 網頁上傳的檔案，下載時的 Content-Type 使用 magic bytes 偵測到的類型（偵測不到時是 `application/octet-stream`），不使用瀏覽器送來的類型。
 - **大檔案一律使用串流**：從 Discord 下載時一邊下載一邊用 multipart upload 上傳到 S3，不會把整個檔案讀進記憶體。
 
 ### 8.4 S3 相容儲存
@@ -245,7 +262,8 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
 - 使用 **private bucket**，因為客服單裡可能有敏感的截圖。bucket 不公開，所有存取都透過 presigned URL。
 - 物件 key：附件是 `tickets/{ticket_id}/{attachment_id}/{filename}`，頭像是 `avatars/{user_id}/{avatar_hash}.{副檔名}`（8.6）。檔名由使用者決定，要先清理（移除路徑分隔符號、控制字元，並限制長度）；原始檔名另外存在資料庫，下載時用 `Content-Disposition` 還原。
 - bot 使用的 S3 金鑰只能存取這個 bucket。
-- bucket 要設定 lifecycle 規則，自動清除沒有完成的 multipart upload（`AbortIncompleteMultipartUpload`）。worker 上傳到一半被強制停止時，已經上傳的部分會留在 S3 上佔用空間。
+- bucket 要設定 lifecycle 規則，自動清除沒有完成的 multipart upload（`AbortIncompleteMultipartUpload`）。worker 上傳到一半被強制停止，或是使用者上傳到一半就離開時，已經上傳的部分會留在 S3 上佔用空間。Silo 不接受這個規則，它用自己的 `stale_uploads_expiry` 設定清除。
+- 瀏覽器直接上傳、下載，所以 bucket 要設定 **CORS**：允許前端的網域（`API_CORS_ORIGINS`）使用 `GET`、`HEAD`、`PUT`，`AllowedHeaders` 是 `*`，`ExposeHeaders` 加上 `ETag`（bot 用 ListParts 取得，不需要；前端的上傳套件可能會讀取）。本機開發用 `uv run python -m bot.storage.create_bucket` 設定；正式環境在建立 bucket 時設定。
 
 **presigned URL**：在網址裡附上簽章與有效期限的 S3 網址（AWS Signature Version 4，S3 相容的服務都支援）。bot 用自己的金鑰在本機算出簽章，不需要呼叫 S3；拿到網址的人可以在期限內直接向 S3 下載，檔案不經過 bot。
 
@@ -262,22 +280,26 @@ Discord 會自己抓取訊息裡的網址並顯示預覽，但抓取時**不會�
 GET /a/<attachment_id>/<token>
 ```
 
-1. 送出網頁的訊息時，為每個附件產生 32 bytes 的隨機 token，資料庫只存 token 的 **SHA-256**。網址由 `PUBLIC_BASE_URL` 加上路徑組成。Discord 傳來的附件本來就在 Discord 裡，不需要分享連結。
-2. 有人打開這個網址（包括 Discord 抓取預覽時），bot 比對 token（使用固定時間的比對），確認附件狀態是 `done`、沒有被撤銷。
+1. worker 送出網頁的訊息時，為每個附件產生 32 bytes 的隨機 token，資料庫只存 token 的 **SHA-256**。網址由 `PUBLIC_BASE_URL` 加上路徑組成。Discord 傳來的附件本來就在 Discord 裡，不需要分享連結。
+   - 每次送出都產生新的 token：資料庫只有雜湊，重試時拿不到上一次的 token。
+   - token 的雜湊先 commit 再送出訊息，因為 Discord 收到訊息後馬上就會來抓預覽。
+2. 有人打開這個網址（包括 Discord 抓取預覽時），bot 比對 token（使用固定時間的比對），確認附件狀態是 `done`、沒有被撤銷。不存在、token 錯誤、已經撤銷都回傳一樣的 `404`。也接受 `HEAD`。
 3. 回傳 `302`，轉址到一個**新的** presigned URL（有效期限同上）。檔案由 S3 直接傳給對方，bot 不經手。轉址的回應要加上 `Cache-Control: no-store`。
-4. 圖片、影片使用 `Content-Disposition: inline`（Discord 才會顯示預覽），其他檔案使用 `attachment`。
+4. presigned URL 帶上 `response-content-type` 與 `response-content-disposition` 參數，S3 依照這兩個參數回傳 Content-Type 與檔名，不依賴物件本身的設定（不同的 S3 服務處理方式不同，例如實測 AWS S3 會依照副檔名覆蓋上傳時設定的 Content-Type）。
+   - 圖片、影片使用 `Content-Disposition: inline`（Discord 才會顯示預覽），其他檔案使用 `attachment`。SVG 裡面可以放 script，所以一律下載。
+   - 檔名：`filename*` 是 UTF-8 的原始檔名，`filename` 是給不支援的程式用的 ASCII 檔名。
 
 - **不需要登入**：拿到連結的人就能打開。連結只會出現在私人的客服單頻道裡，而且無法被猜到。
 - **可以撤銷**：把 `share_revoked_at` 設定時間，連結就立刻失效（例如附件被判定為不合法時；**關單時也會撤銷這張單所有的分享連結**，見第 10 節）。Discord 已經快取的預覽不會因此消失。
 - **客服單開啟期間不會過期**：每次打開都會轉址到新的 presigned URL，聊天紀錄裡的附件不會壞掉。
-- 這個 endpoint 要加上速率限制。
-- **要實測**：Discord 抓取預覽時是否會跟著 `302` 轉到 S3 的網域。不會的話，改成只有在 Discord 抓取時（User-Agent 含 `Discordbot`），由 bot 直接串流檔案。
+- **速率限制**：每個 IP 每分鐘 60 次（Redis 計數）。Redis 無法使用時放行，因為這是為了擋大量請求，安全性靠的是 token 本身。
+- **實測結果**：Discord 抓取預覽時會跟著 `302` 轉址到 S3 的網域。它依照 Content-Type 或檔案內容判斷類型，網址沒有副檔名也能顯示預覽（用短網址服務的 `302` 轉址到 AWS S3 測試）。webhook 訊息裡用 `[檔名](網址)` 的寫法也會顯示圖片預覽（直接連到圖片的網址測試）。
 
 ### 8.5 SSE
 
 - `GET /tickets/{id}/events`：單一客服單的事件。
 - `GET /events`：客服單列表的變動（新開單、被接手、已關閉）。
-- 事件類型：`message.created`、`message.updated`、`message.deleted`、`attachment.updated`（附件處理完，8.1）、`ticket.created`、`ticket.claimed`、`ticket.unclaimed`、`ticket.transferred`、`ticket.member_added`、`ticket.member_removed`、`ticket.opener_added`（開單者加入伺服器後被加進頻道）、`ticket.inactivity_reminded`、`ticket.closed`、`ticket.rated`。`GET /events` 只送 `ticket.*` 的事件。
+- 事件類型：`message.created`、`message.updated`（網頁訊息送到 Discord 的結果 `delivery_status`，8.2；之後也用在訊息編輯）、`message.deleted`、`attachment.updated`（附件處理完，8.1、8.2）、`ticket.created`、`ticket.claimed`、`ticket.unclaimed`、`ticket.transferred`、`ticket.member_added`、`ticket.member_removed`、`ticket.opener_added`（開單者加入伺服器後被加進頻道）、`ticket.inactivity_reminded`、`ticket.closed`、`ticket.rated`。`GET /events` 只送 `ticket.*` 的事件。
 - **所有 SSE 事件都先寫入 `ticket_event`，再推送**（包括 `message.created` 這類訊息事件，`data` 只放 id）。事件的 `id` 就是 `ticket_event.id`。重新連線時，瀏覽器會自動送出 `Last-Event-ID`，伺服器從 `ticket_event` 補送之後的事件（只補送這個使用者有權限看的客服單）。
   - 最多補送 1000 個事件。斷線太久的話，前端重新連線後應該重新載入資料。
   - 事件的順序不一定跟 id 相同：id 在新增時就決定，兩個交易同時寫入時，比較小的 id 可能比較晚 commit。所以伺服器不會因為 id 比較小就略過事件，前端也可能重複收到同一個事件（重新連線時），要用事件的 id 去重。
@@ -360,9 +382,11 @@ GET /a/<attachment_id>/<token>
 | 工作 | 由誰放入 |
 |---|---|
 | `mirror_attachment(attachment_id)`：從 Discord 串流下載，再上傳到 S3 | bot（`on_message`） |
-| `requeue_pending_attachments()`：重新放入沒有成功放進 queue 的 `mirror_attachment` | scheduler（每 10 分鐘） |
-| `verify_attachment(attachment_id)`：檢查網頁上傳的檔案類型 | bot（API 收到上傳完成） |
-| `deliver_messages(ticket_id)`：依照順序把網頁的訊息透過 webhook 送到 Discord | bot（API） |
+| `requeue_pending_attachments()`：重新放入沒有成功放進 queue 的 `mirror_attachment`、`verify_attachment` | scheduler（每 10 分鐘） |
+| `verify_attachment(attachment_id)`：檢查網頁上傳的檔案大小與類型 | bot（API 收到上傳完成） |
+| `delete_unsent_attachments()`：刪除上傳後 24 小時還沒送出的附件 | scheduler（每小時） |
+| `deliver_messages(ticket_id)`：依照順序把網頁的訊息透過 webhook 送到 Discord | bot（API）、`verify_attachment`（訊息在等的附件檢查完時） |
+| `requeue_pending_messages()`：重新放入超過 10 分鐘還沒送出的訊息的 `deliver_messages` | scheduler（每 10 分鐘） |
 | `mirror_avatars()`：把還沒存到 S3 的頭像存起來，再寫入 `avatar_key`（S3 上已經有同一個 hash 的檔案就不下載，見 8.6） | scheduler（每分鐘） |
 | `send_close_notifications(ticket_id)`：關單後的私訊（連結、評分） | 關單的流程（bot 或 worker） |
 | `check_inactive_tickets()`：閒置提醒、自動關閉 | scheduler（每 5 分鐘） |
@@ -456,6 +480,7 @@ ticket_attachment
   source_url（Discord 的下載網址，會過期；過期時用 discord_attachment_id 重新取得）, storage_key
   filename, content_type, size
   status（pending | done | rejected | failed）, attempts
+  upload_id（網頁的 multipart upload）, uploaded_at（網頁上傳完成的時間，null 表示還在上傳）
   share_token_hash（分享連結 token 的 SHA-256，只有網頁上傳的附件才有）, share_revoked_at
   created_at
 
@@ -491,7 +516,7 @@ ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
 | 面板 | `POST /panel/publish` | 管理員 |
 | 客服單 | `POST /tickets`（從網頁開單）、`GET /tickets`（篩選、分頁）、`GET /tickets/{id}` | 依照權限 |
 | 訊息 | `GET`、`POST /tickets/{id}/messages` | 依照權限 |
-| 附件 | `POST /tickets/{id}/attachments`（取得上傳網址）、`POST /attachments/{attachment_id}/complete`、`GET /attachments/{attachment_id}`（取得新的 presigned URL） | 依照權限 |
+| 附件 | `POST /tickets/{id}/attachments`（取得上傳網址）、`POST /attachments/{attachment_id}/parts`（分塊上傳每一塊的網址）、`POST /attachments/{attachment_id}/complete`、`DELETE /attachments/{attachment_id}`（移除還沒送出的附件）、`GET /attachments/{attachment_id}`（取得新的 presigned URL） | 依照權限；申請網址以外只有上傳的人 |
 | 分享連結 | `GET /a/{attachment_id}/{token}`（302 轉址到新的 presigned URL，見 8.4.1） | 不需要登入，用 token 驗證 |
 | 操作 | `POST /tickets/{id}/claim`、`/unclaim`、`/transfer`、`/close`、`/members`，`DELETE /tickets/{id}/members/{user_id}` | 依照權限 |
 | 評分 | `PUT /tickets/{id}/rating`（分數 1–5、評語） | 開單者，只能一次 |
@@ -539,7 +564,7 @@ ENCRYPTION_KEYS       Fernet 金鑰，逗號分隔，第一個是目前使用的
 S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET
                       S3_ENDPOINT 留空表示 AWS S3
 S3_PRESIGN_TTL        presigned URL 的有效期限（秒，預設 600）
-PUBLIC_BASE_URL       bot 對外的網址，用來組出分享連結（8.4.1）
+PUBLIC_BASE_URL       bot 對外的網址（Discord 要連得到），用來組出分享連結（8.4.1）
 WEB_TICKET_URL        紀錄頁面網址的格式，例：https://.../tickets/{id}
 ```
 
@@ -547,4 +572,5 @@ API 與身分驗證相關的環境變數見 `docs/auth.md`。
 
 ## 17. 需要實測的項目
 
-- Discord 抓取附件預覽時，是否會跟著 `302` 轉址（8.4.1）。
+- 用公開的 S3 與 bot 網址，從網頁上傳到 Discord 顯示預覽，從頭到尾測一次。目前 `302` 轉址與 `[檔名](網址)` 的寫法分開測過都會顯示預覽，還沒有兩者一起測。
+- 公開的 S3 服務（R2、AWS S3）是否跟 Silo 一樣，拒絕大小跟簽章不同的上傳（8.2）。不會的話，`verify_attachment` 仍然會檢查大小。

@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     s3_bucket: str
     # presigned URL 的有效期限（秒）
     s3_presign_ttl: int = 600
+    # bot 對外的網址，用來組出分享連結（docs/tickets.md 8.4.1），例如 https://bot.example.com
+    public_base_url: str
 
     api_host: str = "127.0.0.1"
     api_port: int = 8000
@@ -37,6 +39,11 @@ class Settings(BaseSettings):
     def _empty_is_none(cls, value: object) -> object:
         # S3_ENDPOINT= 留空表示使用 AWS
         return None if value == "" else value
+
+    @field_validator("public_base_url")
+    @classmethod
+    def _strip_slash(cls, value: str) -> str:
+        return value.rstrip("/")
 
     @field_validator("api_cors_origins", mode="before")
     @classmethod

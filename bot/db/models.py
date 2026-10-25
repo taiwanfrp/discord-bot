@@ -200,6 +200,10 @@ class TicketAttachment(Base):
     size: Mapped[int] = mapped_column(BigInteger)
     status: Mapped[AttachmentStatus] = mapped_column(default=AttachmentStatus.PENDING)
     attempts: Mapped[int] = mapped_column(default=0)
+    # 網頁上傳：multipart upload 的 id（檔案超過一塊時才有）
+    upload_id: Mapped[str | None] = mapped_column(String(1024))
+    # 網頁上傳：瀏覽器上傳完成的時間，null 表示還在上傳
+    uploaded_at: Mapped[datetime | None]
     # 分享連結 token 的 SHA-256（hex），只有網頁上傳的附件才有
     share_token_hash: Mapped[str | None] = mapped_column(String(64))
     share_revoked_at: Mapped[datetime | None]

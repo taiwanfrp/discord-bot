@@ -7,16 +7,26 @@ from datetime import timedelta
 import aiohttp
 import discord
 from redis.exceptions import LockError
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from taskiq import Context
 
 from bot.core.config import get_settings
 from bot.core.redis import get_redis
 from bot.db.engine import get_sessionmaker
-from bot.db.models import AttachmentStatus, Source, Ticket, TicketAttachment, TicketStatus
+from bot.db.models import (
+    AttachmentStatus,
+    DeliveryStatus,
+    Source,
+    Ticket,
+    TicketAttachment,
+    TicketMessage,
+    TicketStatus,
+)
 from bot.db.types import utcnow
-from bot.storage import mirror
+from bot.storage import mirror, uploads
 from bot.storage.s3 import s3_client
+from bot.storage.status import finish
+from bot.tickets import delivery
 from bot.tickets.open import add_opener, pending_openers_query
 from bot.tickets.permissions import staff_role_ids, sync_role_overwrites
 from bot.worker.broker import ContextDep, DiscordDep, broker, is_last_attempt
@@ -90,8 +100,39 @@ async def mirror_attachment(
                 await db.rollback()
                 attachment = await db.get(TicketAttachment, attachment_id)
                 if attachment is not None and attachment.status is AttachmentStatus.PENDING:
-                    await mirror.finish(db, attachment, AttachmentStatus.FAILED)
+                    await finish(db, attachment, AttachmentStatus.FAILED)
             raise
+
+
+@broker.task
+async def verify_attachment(attachment_id: int, context: Context = ContextDep) -> None:
+    """檢查網頁上傳的檔案；附件已經在訊息裡的話，接著送出那則訊息。"""
+    async with get_sessionmaker()() as db, s3_client() as s3:
+        try:
+            ticket_id = await uploads.verify_attachment(db, s3, attachment_id)
+        except Exception:
+            if is_last_attempt(context):
+                await db.rollback()
+                # 標記為 failed，等它的訊息就不用再等了（訊息照樣送出，只是沒有這個附件）
+                ticket_id = await uploads.give_up(db, attachment_id)
+                if ticket_id is not None:
+                    await deliver_messages.kiq(ticket_id)
+            raise
+    if ticket_id is not None:
+        await deliver_messages.kiq(ticket_id)
+
+
+@broker.task
+async def deliver_messages(
+    ticket_id: int,
+    discord_client: discord.Client = DiscordDep,
+    context: Context = ContextDep,
+) -> None:
+    """依照順序把這張單的網頁訊息透過 webhook 送到 Discord。"""
+    async with get_sessionmaker()() as db:
+        await delivery.deliver_messages(
+            db, get_redis(), discord_client, ticket_id, last_attempt=is_last_attempt(context)
+        )
 
 
 @broker.task(schedule=[{"cron": "* * * * *"}])
@@ -115,21 +156,63 @@ async def mirror_avatars() -> None:
 
 @broker.task(schedule=[{"cron": "*/10 * * * *"}])
 async def requeue_pending_attachments() -> None:
-    """補放入 mirror_attachment。
+    """補放入 mirror_attachment、verify_attachment。
 
     bot 存好附件之後、放入 queue 之前中斷的話，附件會一直是 pending。
     """
+    before = utcnow() - timedelta(minutes=10)
     async with get_sessionmaker()() as db:
-        ids = list(
-            await db.scalars(
-                select(TicketAttachment.id).where(
-                    TicketAttachment.source == Source.DISCORD,
+        rows = list(
+            await db.execute(
+                select(TicketAttachment.id, TicketAttachment.source).where(
                     TicketAttachment.status == AttachmentStatus.PENDING,
                     # 還沒有任何 worker 處理過（處理過的會由重試機制負責）
                     TicketAttachment.attempts == 0,
-                    TicketAttachment.created_at < utcnow() - timedelta(minutes=10),
+                    or_(
+                        and_(
+                            TicketAttachment.source == Source.DISCORD,
+                            TicketAttachment.created_at < before,
+                        ),
+                        # 網頁上傳的附件在上傳完成之後才會檢查
+                        and_(
+                            TicketAttachment.source == Source.WEB,
+                            TicketAttachment.uploaded_at < before,
+                        ),
+                    ),
                 )
             )
         )
-    for attachment_id in ids:
-        await mirror_attachment.kiq(attachment_id)
+    for attachment_id, source in rows:
+        if source is Source.DISCORD:
+            await mirror_attachment.kiq(attachment_id)
+        else:
+            await verify_attachment.kiq(attachment_id)
+
+
+@broker.task(schedule=[{"cron": "*/10 * * * *"}])
+async def requeue_pending_messages() -> None:
+    """補放入 deliver_messages（API 存好訊息之後、放入 queue 之前中斷時）。
+
+    不看 attempts：送出的工作是以客服單為單位，多放一次也只會依照順序送出還沒送的訊息。
+    """
+    async with get_sessionmaker()() as db:
+        ticket_ids = list(
+            await db.scalars(
+                select(TicketMessage.ticket_id)
+                .where(
+                    TicketMessage.source == Source.WEB,
+                    TicketMessage.delivery_status == DeliveryStatus.PENDING,
+                    TicketMessage.created_at < utcnow() - timedelta(minutes=10),
+                )
+                .distinct()
+            )
+        )
+    for ticket_id in ticket_ids:
+        await deliver_messages.kiq(ticket_id)
+
+
+@broker.task(schedule=[{"cron": "0 * * * *"}])
+async def delete_unsent_attachments() -> None:
+    """刪除上傳之後一直沒有送出的附件（例如使用者關掉網頁）。"""
+    async with get_sessionmaker()() as db, s3_client() as s3:
+        await uploads.delete_unsent(db, s3)

@@ -2,7 +2,7 @@ import hashlib
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import discord
 from discord.ext import commands
@@ -16,6 +16,12 @@ from bot.core.config import get_settings
 from bot.core.permissions import Access, get_access
 from bot.core.redis import get_redis, get_session_redis
 from bot.db.engine import get_sessionmaker
+
+if TYPE_CHECKING:
+    from types_aiobotocore_s3 import S3Client
+else:
+    # 只有型別資訊（開發用的套件），正式環境沒有安裝
+    S3Client = Any
 
 
 def get_bot(request: Request) -> commands.Bot:
@@ -46,12 +52,19 @@ def get_event_hub(request: Request) -> EventHub:
     return hub
 
 
+def get_s3(request: Request) -> S3Client:
+    """bot 啟動時建立、一直使用的 S3 client（產生 presigned URL 不需要連線到 S3）。"""
+    s3: S3Client = request.app.state.s3
+    return s3
+
+
 BotDep = Annotated[commands.Bot, Depends(get_bot)]
 GuildDep = Annotated[discord.Guild, Depends(get_guild)]
 DBDep = Annotated[AsyncSession, Depends(get_db)]
 SessionmakerDep = Annotated[async_sessionmaker[AsyncSession], Depends(get_db_sessionmaker)]
 HubDep = Annotated[EventHub, Depends(get_event_hub)]
 RedisDep = Annotated[Redis, Depends(get_redis)]
+S3Dep = Annotated[S3Client, Depends(get_s3)]
 SessionRedisDep = Annotated[Redis, Depends(get_session_redis)]
 
 

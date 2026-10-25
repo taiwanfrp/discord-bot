@@ -1,6 +1,6 @@
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, Update
+from sqlalchemy import CursorResult, Delete, Update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,8 +23,8 @@ async def get_guild_settings(session: AsyncSession) -> GuildSettings:
     return settings
 
 
-async def execute_update(session: AsyncSession, statement: Update) -> int:
-    """執行 UPDATE，回傳更新的筆數。
+async def execute_update(session: AsyncSession, statement: Update | Delete) -> int:
+    """執行 UPDATE（或 DELETE），回傳更新的筆數。
 
     搭配 WHERE 條件（例如 status 還是 open）使用，可以確保同時發生的兩個操作只有一個成功。
     """

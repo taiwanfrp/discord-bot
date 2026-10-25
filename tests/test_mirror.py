@@ -6,7 +6,6 @@ from typing import Any, cast
 import aiohttp
 import discord
 import pytest
-from botocore.exceptions import ClientError
 from fakeredis import FakeAsyncRedis
 from multidict import CIMultiDict, CIMultiDictProxy
 from sqlalchemy import select
@@ -26,37 +25,8 @@ from bot.db.models import (
     TicketUser,
 )
 from bot.storage import mirror, s3
+from tests.fake_s3 import FakeS3
 from tests.test_files import EXE, PNG
-
-
-class FakeS3:
-    """只實作用到的 S3 API，存在記憶體裡。"""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.uploads: dict[str, list[bytes]] = {}
-        self.aborted: list[str] = []
-
-    async def create_multipart_upload(self, *, Key: str, **_: Any) -> dict[str, str]:
-        self.uploads[Key] = []
-        return {"UploadId": Key}
-
-    async def upload_part(self, *, UploadId: str, Body: bytes, **_: Any) -> dict[str, str]:
-        self.uploads[UploadId].append(Body)
-        return {"ETag": str(len(self.uploads[UploadId]))}
-
-    async def complete_multipart_upload(self, *, Key: str, **_: Any) -> None:
-        self.objects[Key] = b"".join(self.uploads.pop(Key))
-
-    async def abort_multipart_upload(self, *, Key: str, **_: Any) -> None:
-        self.aborted.append(Key)
-
-    async def head_object(self, *, Key: str, **_: Any) -> None:
-        if Key not in self.objects:
-            raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
-
-    async def put_object(self, *, Key: str, Body: bytes, **_: Any) -> None:
-        self.objects[Key] = Body
 
 
 class FakeContent:
@@ -210,11 +180,21 @@ async def test_multipart_upload(fake_s3: FakeS3, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(s3, "PART_SIZE", 250)
     body = bytes(range(256)) * 4
 
+    sizes: list[int] = []
+    upload_part = fake_s3.upload_part
+
+    async def record(*, Body: bytes, **kwargs: Any) -> dict[str, str]:
+        sizes.append(len(Body))
+        return await upload_part(Body=Body, **kwargs)
+
+    fake_s3.upload_part = record  # type: ignore[method-assign]
     size = await s3.upload_stream(
         cast(Any, fake_s3), "k", FakeContent(body).iter_chunked(0), content_type="x"
     )
     assert size == len(body)
     assert fake_s3.objects["k"] == body
+    # 除了最後一塊，每一塊都剛好是 PART_SIZE（R2 要求大小相同）
+    assert sizes == [250, 250, 250, 250, 24]
 
     async def broken() -> AsyncIterator[bytes]:
         yield b"x" * 300

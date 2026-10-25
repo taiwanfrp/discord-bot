@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from bot.db.models import Source, TicketStatus
+from bot.db.models import AttachmentStatus, DeliveryStatus, Source, TicketStatus
 from bot.tickets.channel_name import validate_template
 
 # Discord ID 在 JSON 裡一律用字串（超過 JavaScript 的安全整數範圍）
@@ -225,3 +225,68 @@ class UserIdIn(BaseModel):
 
 class CloseIn(BaseModel):
     reason: str | None = Field(None, min_length=1, max_length=1000)
+
+
+class AttachmentIn(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    size: int = Field(ge=1)
+
+
+class AttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ticket_id: int
+    # 網頁上傳的附件在送出訊息之前是 null
+    message_id: int | None
+    uploader_id: Snowflake
+    source: Source
+    filename: str
+    # 網頁上傳的附件檢查完之後，依照檔案內容判斷
+    content_type: str | None
+    size: int
+    # pending（處理中）、done、rejected（類型不符）、failed
+    status: AttachmentStatus
+    created_at: datetime
+
+
+class UploadOut(BaseModel):
+    """上傳的方式（docs/tickets.md 8.2）。上傳完之後呼叫 POST /attachments/{id}/complete。"""
+
+    attachment: AttachmentOut
+    # 檔案不超過 part_size：直接 PUT 整個檔案到這個網址
+    url: str | None
+    # 超過：分塊上傳。用 POST /attachments/{id}/parts 取得每一塊的網址，
+    # 每一塊都是 part_size，只有最後一塊比較小
+    part_size: int | None
+    part_count: int | None
+
+
+class PartsIn(BaseModel):
+    # 網址有期限，在上傳之前才分批取得
+    part_numbers: list[int] = Field(min_length=1, max_length=100)
+
+
+class PartUrlOut(BaseModel):
+    part_number: int
+    url: str
+
+
+class MessageIn(BaseModel):
+    content: str = Field("", max_length=2000)
+    # 上傳完成、還沒送出的附件
+    attachment_ids: list[int] = Field(default_factory=list, max_length=10)
+
+
+class MessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ticket_id: int
+    source: Source
+    author_id: Snowflake
+    content: str
+    created_at: datetime
+    # 網頁訊息才有：pending（還沒送到 Discord）、sent、failed
+    delivery_status: DeliveryStatus | None
+    attachments: list[AttachmentOut] = []

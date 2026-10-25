@@ -20,7 +20,6 @@ from bot.db.models import (
     AttachmentStatus,
     Ticket,
     TicketAttachment,
-    TicketEvent,
     TicketMessage,
     TicketUser,
 )
@@ -33,6 +32,7 @@ from bot.storage.files import (
     check_magic,
 )
 from bot.storage.s3 import object_exists, s3_client, upload_stream
+from bot.storage.status import finish
 
 if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client
@@ -172,22 +172,6 @@ async def prepend(head: bytes, chunks: AsyncIterator[bytes]) -> AsyncIterator[by
         yield head
     async for chunk in chunks:
         yield chunk
-
-
-async def finish(db: AsyncSession, attachment: TicketAttachment, status: AttachmentStatus) -> None:
-    attachment.status = status
-    db.add(
-        TicketEvent(
-            ticket_id=attachment.ticket_id,
-            type="attachment.updated",
-            data={
-                "attachment_id": str(attachment.id),
-                "message_id": str(attachment.message_id) if attachment.message_id else None,
-                "status": status.value,
-            },
-        )
-    )
-    await db.commit()
 
 
 async def mirror_avatars(

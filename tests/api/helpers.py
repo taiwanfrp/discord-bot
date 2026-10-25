@@ -8,6 +8,8 @@ from fakeredis import FakeAsyncRedis
 from httpx import AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from tests.fake_s3 import FakeS3
+
 ORIGIN = "https://web.test"
 USER_ID = 2**60
 ADMIN_ROLE_ID = 10
@@ -174,8 +176,12 @@ class Env:
         self.guild = bot.guild
         self.sessions = sessions
         self.sessionmaker = sessionmaker
-        # sync_ticket_permissions.kiq 的 mock
+        # 放入 queue 的 mock（.kiq）
         self.sync_permissions = AsyncMock()
+        self.verify = AsyncMock()
+        self.deliver = AsyncMock()
+        self.s3 = FakeS3()
+        self.redis = FakeAsyncRedis(decode_responses=True)
 
     async def login_main_api(self, ttl: int = 100, user_id: int = USER_ID) -> str:
         """模擬主要 API：建立 session 與授權碼。"""

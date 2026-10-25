@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import pkgutil
 import signal
@@ -13,6 +14,7 @@ from bot.api.sse import EventHub
 from bot.core.redis import listen_events
 from bot.core.tree import CommandTree
 from bot.db.engine import get_engine, get_sessionmaker
+from bot.storage.s3 import s3_client
 from bot.tickets.controls import TicketControlsView
 from bot.tickets.panel import PanelView
 from bot.worker.broker import broker
@@ -38,6 +40,8 @@ class Bot(commands.Bot):
         self._api_server: Server | None = None
         self._api_task: asyncio.Task[None] | None = None
         self._close_task: asyncio.Task[None] | None = None
+        # API 一直使用的 S3 client，關閉時一起關閉
+        self._resources = contextlib.AsyncExitStack()
         # 把事件推送給連線中的 SSE
         self.event_hub = EventHub(get_sessionmaker)
 
@@ -62,7 +66,8 @@ class Bot(commands.Bot):
         synced = await self.tree.sync()
         log.info("Synced %d global commands", len(synced))
 
-        self._api_server = create_server(self, self.event_hub)
+        s3 = await self._resources.enter_async_context(s3_client())
+        self._api_server = create_server(self, self.event_hub, s3)
         self._api_task = asyncio.create_task(self._api_server.serve())
 
     def _on_ticket_event(self, event_id: int) -> None:
@@ -71,6 +76,10 @@ class Bot(commands.Bot):
         self.dispatch("ticket_event", event_id)
 
     def _on_sigterm(self) -> None:
+        # 可能收到不只一次（例如 uv run 轉送、或是送給整個 process group），
+        # 同時關閉兩次的話，第二次會中斷第一次正在關閉的連線
+        if self._close_task is not None:
+            return
         log.info("Received SIGTERM, shutting down")
         self._close_task = asyncio.create_task(self.close())
 
@@ -85,6 +94,7 @@ class Bot(commands.Bot):
             await self._api_task
         if self._events_task is not None:
             self._events_task.cancel()
+        await self._resources.aclose()
         await broker.shutdown()
         await get_engine().dispose()
         await super().close()

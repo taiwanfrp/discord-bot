@@ -1,17 +1,22 @@
 import discord
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import (
     AttachmentStatus,
+    DeliveryStatus,
     Source,
     Ticket,
     TicketAttachment,
     TicketEvent,
     TicketMessage,
 )
-from bot.db.queries import get_guild_settings
+from bot.db.queries import execute_update, get_guild_settings
 from bot.storage.files import allowed_file_types, is_allowed_extension
+from bot.tickets.actions import require_open
+from bot.tickets.delivery import MAX_LENGTH, max_length
+from bot.tickets.errors import TicketError
 from bot.tickets.snapshot import update_snapshot
 
 
@@ -76,3 +81,82 @@ async def save_discord_message(
     )
     await db.commit()
     return [a.id for a in attachments if a.status is AttachmentStatus.PENDING]
+
+
+async def create_web_message(
+    db: AsyncSession,
+    ticket: Ticket,
+    author: discord.User | discord.Member,
+    content: str,
+    attachment_ids: list[int],
+) -> tuple[TicketMessage, list[TicketAttachment]]:
+    """網頁送出的訊息加密後存進資料庫，之後由 deliver_messages 送到 Discord（docs/tickets.md 8.2）。
+
+    附件要是這個人在這張單上傳完、還沒送出的。檢查還沒完成的也可以，訊息會等它檢查完再送。
+    """
+    require_open(ticket)
+    if not content.strip() and not attachment_ids:
+        raise TicketError("訊息不能是空的", 422)
+    if len(set(attachment_ids)) != len(attachment_ids):
+        raise TicketError("附件重複了", 422)
+    attachments = list(
+        await db.scalars(
+            select(TicketAttachment)
+            .where(TicketAttachment.id.in_(attachment_ids))
+            .order_by(TicketAttachment.id)
+        )
+    )
+    usable = {
+        a.id
+        for a in attachments
+        if a.ticket_id == ticket.id
+        and a.uploader_id == author.id
+        and a.source is Source.WEB
+        and a.uploaded_at is not None
+        and a.message_id is None
+        and a.status in (AttachmentStatus.PENDING, AttachmentStatus.DONE)
+    }
+    if usable != set(attachment_ids):
+        raise TicketError("有附件還沒上傳完成、沒有通過檢查，或是已經送出過了", 422)
+    if max_length(content, attachments) > MAX_LENGTH:
+        raise TicketError(
+            f"訊息加上附件連結超過 Discord 的 {MAX_LENGTH} 字上限，請縮短內容或分開送出", 422
+        )
+
+    message = TicketMessage(
+        ticket_id=ticket.id,
+        source=Source.WEB,
+        author_id=author.id,
+        content=content,
+        delivery_status=DeliveryStatus.PENDING,
+    )
+    db.add(message)
+    await db.flush()
+    if attachment_ids:
+        # 帶條件的 UPDATE：同一個附件同時被放進兩則訊息時，只有一則會成功
+        attached = await execute_update(
+            db,
+            update(TicketAttachment)
+            .where(TicketAttachment.id.in_(attachment_ids), TicketAttachment.message_id.is_(None))
+            .values(message_id=message.id),
+        )
+        if attached != len(attachment_ids):
+            await db.rollback()
+            raise TicketError("有附件已經送出過了", 409)
+
+    await update_snapshot(db, ticket.id, author)
+    ticket.last_message_at = message.created_at
+    # 有新訊息就重新計算閒置時間（docs/tickets.md 第 9 節）
+    ticket.inactivity_reminded_at = None
+    db.add(
+        TicketEvent(
+            ticket_id=ticket.id,
+            type="message.created",
+            actor_id=author.id,
+            data={"message_id": str(message.id)},
+        )
+    )
+    await db.commit()
+    for attachment in attachments:
+        await db.refresh(attachment)
+    return message, attachments

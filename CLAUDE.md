@@ -17,7 +17,7 @@ TaiwanFRP 的 Discord bot，只服務單一伺服器。主要功能是客服單�
 ```bash
 uv sync                              # 安裝依賴
 docker compose up -d                 # 本機開發用的 Redis、Silo（S3）
-uv run python -m bot.storage.create_bucket   # 建立本機開發用的 bucket（第一次啟動 Silo 後）
+uv run python -m bot.storage.create_bucket   # 建立本機開發用的 bucket、設定 CORS（第一次啟動 Silo 後）
 uv run main.py                       # 啟動 bot
 uv run taskiq worker bot.worker.broker:broker bot.worker.tasks --workers 1   # 啟動 worker
 uv run taskiq scheduler bot.worker.scheduler:scheduler bot.worker.tasks     # 啟動 scheduler（重試也靠它）
@@ -40,8 +40,8 @@ bot/
 ├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command、啟動 API）、設定、Redis 與事件通知、權限、Cog 基底類別、CommandTree（錯誤處理）
 ├── api/             # HTTP API（FastAPI，跟 bot 在同一個程序）：routes、dependencies、CSRF
 ├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session、commit 後推送 ticket_event 的 hook
-├── storage/         # S3（aiobotocore）、附件的檔案規則（副檔名、magic bytes、key）、附件與頭像存到 S3
-├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式
+├── storage/         # S3（aiobotocore）、附件的檔案規則（副檔名、magic bytes、key）、附件與頭像存到 S3、網頁上傳（presigned URL、檢查）、分享連結
+├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式、網頁訊息與附件、用 webhook 送到 Discord
 ├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 migrations/          # Alembic migration
@@ -58,6 +58,7 @@ TODO.md
 - 只使用 slash command，不使用前綴指令。指令是**全域同步**，伺服器與私訊都可用；只能在伺服器使用的指令加 `@app_commands.guild_only()`。
 - `bot/cogs/` 底下的每個模組都必須有 `async def setup(bot)`，因為 `pkgutil.iter_modules` 會全部載入。輔助程式放在 `bot/core/` 或其他套件，不要放進 `cogs/`。
 - cog 繼承 `bot.core.cog.Cog`（已提供 `self.bot`）。
+- bot 代替使用者送出的內容（例如網頁訊息的 webhook）一律 `allowed_mentions=discord.AllowedMentions.none()`，裡面的 `@everyone` 等只顯示、不通知。
 - 要讓使用者看到的錯誤，丟出 `bot.core.tree.UserFacingError("訊息")`；其餘未預期的錯誤由 `CommandTree.on_error` 統一記錄並回覆。
 - 使用 `logging.getLogger(__name__)`，不要用 `print`。
 - 設定一律來自環境變數或 `.env`，透過 `bot.core.config.get_settings()` 讀取，不要寫死在程式裡；`.env` 不可 commit，新增設定時同步更新 `Settings` 與 `.env.example`。
@@ -82,7 +83,7 @@ TODO.md
 - Discord ID 在 JSON 裡一律用字串（snowflake 超過 JavaScript 的安全整數範圍）。
 - 會修改資料的請求要檢查 `Origin`，並且只接受 `application/json`。
 - 權限一律在 bot 端判斷，不能相信前端送來的身分或角色資料。
-- route 放在 `bot/api/routes/`，用 `bot/api/deps.py` 的 dependency 取得資料：`ViewerDep`（需要登入）、`AdminDep`（只有管理員）、`GuildDep`、`DBDep`、`RedisDep`。不要在 route 裡直接呼叫 `get_redis()` 等函式，測試才能替換。
+- route 放在 `bot/api/routes/`，用 `bot/api/deps.py` 的 dependency 取得資料：`ViewerDep`（需要登入）、`AdminDep`（只有管理員）、`GuildDep`、`DBDep`、`RedisDep`、`S3Dep`（bot 啟動時建立的 S3 client）。不要在 route 裡直接呼叫 `get_redis()`、`s3_client()` 等函式，測試才能替換。
 - 客服單的流程寫在 `bot/tickets/`，Discord 與 API 共用；要讓使用者看到的錯誤丟出 `bot.tickets.open.TicketError(訊息, status_code)`，API 轉成 HTTP 錯誤，Discord 回覆訊息。
 - 權限用 `viewer.access`（`bot.core.permissions.Access`）：`is_admin`、`is_staff(category_id)`。開單者的判斷是 `viewer.id == ticket.opener_id`。
 - request / response 的格式寫在 `bot/api/schemas.py`；Discord ID 的欄位用那裡的 `Snowflake` 型別（輸出時轉成字串）。

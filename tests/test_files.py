@@ -9,7 +9,10 @@ from bot.storage.files import (
     attachment_key,
     avatar_key,
     check_magic,
+    content_disposition,
+    detect_content_type,
     is_allowed_extension,
+    is_inline,
     safe_filename,
 )
 
@@ -69,3 +72,23 @@ def test_keys() -> None:
     assert attachment_key(1, 2, "a/b.png") == "tickets/1/2/a_b.png"
     assert avatar_key(5, "abc") == "avatars/5/abc.webp"
     assert avatar_key(5, "a_abc") == "avatars/5/a_abc.gif"
+
+
+def test_content_type() -> None:
+    assert detect_content_type(PNG) == "image/png"
+    # 偵測不到（例如純文字）時一律下載
+    assert detect_content_type(b"hello") == "application/octet-stream"
+    assert is_inline("image/png") and is_inline("video/mp4")
+    assert not is_inline("application/pdf")
+    assert not is_inline("image/svg+xml")
+    assert not is_inline(None)
+
+
+def test_content_disposition() -> None:
+    assert content_disposition("a.pdf", inline=False) == (
+        "attachment; filename=\"a.pdf\"; filename*=UTF-8''a.pdf"
+    )
+    # 非 ASCII 與引號只出現在 filename* 裡（百分比編碼）
+    assert content_disposition('圖 "1".png', inline=True) == (
+        "inline; filename=\"_ _1_.png\"; filename*=UTF-8''%E5%9C%96%20%221%22.png"
+    )

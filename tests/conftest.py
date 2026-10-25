@@ -19,6 +19,7 @@ os.environ["S3_ENDPOINT"] = "http://127.0.0.1:1"
 os.environ["S3_ACCESS_KEY_ID"] = "test"
 os.environ["S3_SECRET_ACCESS_KEY"] = "test"
 os.environ["S3_BUCKET"] = "test"
+os.environ["PUBLIC_BASE_URL"] = "https://bot.test"
 
 
 @pytest.fixture(autouse=True)

@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from urllib.parse import quote
 
 import filetype
 
@@ -65,6 +66,32 @@ def check_magic(head: bytes, filename: str, allowed: frozenset[str]) -> str | No
     ):
         return None
     return detected
+
+
+def detect_content_type(head: bytes) -> str:
+    """用 magic bytes 判斷的 MIME type，偵測不到（例如純文字）時是 application/octet-stream。
+
+    網頁上傳的檔案下載時用它當作 Content-Type，不相信瀏覽器送來的類型。
+    """
+    mime = filetype.guess_mime(head)
+    return str(mime) if mime else "application/octet-stream"
+
+
+def is_inline(content_type: str | None) -> bool:
+    """圖片、影片直接顯示（Discord 才會顯示預覽），其他檔案一律下載。
+
+    SVG 裡面可以放 script，所以不直接顯示。
+    """
+    if content_type is None or content_type == "image/svg+xml":
+        return False
+    return content_type.startswith(("image/", "video/"))
+
+
+def content_disposition(filename: str, *, inline: bool) -> str:
+    """下載時還原原始檔名（RFC 6266）：filename* 是 UTF-8，filename 給不支援的程式用。"""
+    fallback = re.sub(r'[^\x20-\x7e]|["\\]', "_", filename)
+    kind = "inline" if inline else "attachment"
+    return f"{kind}; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
 def safe_filename(filename: str) -> str:

@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 import uvicorn
 from discord.ext import commands
@@ -8,17 +11,32 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from bot.api.csrf import CSRFMiddleware
 from bot.api.deps import BotDep, UserCache
-from bot.api.routes import auth, categories, events, guild, panel, permission_roles, tickets
+from bot.api.routes import (
+    attachments,
+    auth,
+    categories,
+    events,
+    guild,
+    messages,
+    panel,
+    permission_roles,
+    share,
+    tickets,
+)
 from bot.api.routes import settings as settings_routes
 from bot.api.sse import EventHub
 from bot.core.config import get_settings
 
+if TYPE_CHECKING:
+    from types_aiobotocore_s3 import S3Client
 
-def create_app(bot: commands.Bot, event_hub: EventHub) -> FastAPI:
+
+def create_app(bot: commands.Bot, event_hub: EventHub, s3: S3Client) -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="TaiwanFRP Ticket Bot")
     app.state.bot = bot
     app.state.event_hub = event_hub
+    app.state.s3 = s3
     app.state.user_cache = UserCache()
 
     # 後加入的 middleware 在外層：CORS 先處理 preflight，再檢查 CSRF
@@ -39,6 +57,9 @@ def create_app(bot: commands.Bot, event_hub: EventHub) -> FastAPI:
         permission_roles,
         panel,
         tickets,
+        messages,
+        attachments,
+        share,
         events,
     ):
         app.include_router(module.router)
@@ -59,10 +80,10 @@ class Server(uvicorn.Server):
         yield
 
 
-def create_server(bot: commands.Bot, event_hub: EventHub) -> Server:
+def create_server(bot: commands.Bot, event_hub: EventHub, s3: S3Client) -> Server:
     settings = get_settings()
     config = uvicorn.Config(
-        create_app(bot, event_hub),
+        create_app(bot, event_hub, s3),
         host=settings.api_host,
         port=settings.api_port,
         # 只信任自己的 proxy 送來的 X-Forwarded-For（docs/auth.md 第 8 節）

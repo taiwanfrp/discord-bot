@@ -15,7 +15,8 @@ if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client
     from types_aiobotocore_s3.type_defs import CompletedPartTypeDef
 
-# multipart upload 每一塊的大小（S3 規定最後一塊以外至少 5 MiB）
+# multipart upload 每一塊的大小（S3 規定最後一塊以外至少 5 MiB）。
+# 除了最後一塊，每一塊都剛好是這個大小（R2 要求最後一塊以外的大小都相同）
 PART_SIZE = 8 * 1024 * 1024
 
 
@@ -35,11 +36,15 @@ async def s3_client() -> AsyncIterator[S3Client]:
         yield client
 
 
+def is_not_found(error: ClientError) -> bool:
+    return error.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound")
+
+
 async def object_exists(client: S3Client, key: str) -> bool:
     try:
         await client.head_object(Bucket=get_settings().s3_bucket, Key=key)
     except ClientError as error:
-        if error.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+        if is_not_found(error):
             return False
         raise
     return True
@@ -56,23 +61,23 @@ async def upload_stream(
     size = 0
     buffer = bytearray()
 
-    async def flush() -> None:
+    async def flush(body: bytes) -> None:
         number = len(parts) + 1
         result = await client.upload_part(
-            Bucket=bucket, Key=key, UploadId=upload_id, PartNumber=number, Body=bytes(buffer)
+            Bucket=bucket, Key=key, UploadId=upload_id, PartNumber=number, Body=body
         )
         parts.append({"ETag": result["ETag"], "PartNumber": number})
-        buffer.clear()
 
     try:
         async for chunk in chunks:
             buffer.extend(chunk)
             size += len(chunk)
-            if len(buffer) >= PART_SIZE:
-                await flush()
+            while len(buffer) >= PART_SIZE:
+                await flush(bytes(buffer[:PART_SIZE]))
+                del buffer[:PART_SIZE]
         # 最後一塊（也可能是唯一的一塊，空檔案也要有一塊）
         if buffer or not parts:
-            await flush()
+            await flush(bytes(buffer))
         await client.complete_multipart_upload(
             Bucket=bucket,
             Key=key,

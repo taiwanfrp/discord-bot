@@ -96,11 +96,14 @@
 
 ## 8. 網頁 → Discord 同步
 
-- [ ] `POST /tickets/{id}/attachments`（上傳網址、multipart）與上傳完成後的類型檢查（`verify_attachment`）
-- [ ] `POST /tickets/{id}/messages`：加密寫入，交給 worker 用 webhook 送出（附件為分享連結）
-- [ ] 分享連結 `GET /a/{attachment_id}/{token}`：比對 token 的雜湊、302 轉址、撤銷、速率限制
-- [ ] 實測 Discord 抓取預覽時是否跟著 302 轉址
-- [ ] `deliver_messages(ticket_id)`：取得客服單的鎖，依照順序送出所有待送的訊息
+- [x] `POST /tickets/{id}/attachments`（上傳網址、multipart 的 `parts`）、`complete`、`DELETE`，上傳完成後的大小與類型檢查（`verify_attachment`）；沒有送出的附件 24 小時後刪除
+- [x] bucket 的 CORS（`create_bucket` 設定）
+- [x] `POST /tickets/{id}/messages`：加密寫入，交給 worker 用 webhook 送出（附件為分享連結、不通知任何人）
+- [x] 分享連結 `GET /a/{attachment_id}/{token}`：比對 token 的雜湊、302 轉址、撤銷、速率限制
+- [x] 實測 Discord 抓取預覽時是否跟著 302 轉址（用短網址服務轉址到 AWS S3 測試，會跟著轉址）
+- [x] `deliver_messages(ticket_id)`：取得客服單的鎖，依照順序送出所有待送的訊息；webhook 被刪除時重新建立；`requeue_pending_messages` 補放
+- [x] 實際測試（Silo）：單一上傳、分塊上傳、大小不符被 S3 拒絕、偽裝的執行檔、訊息等附件檢查完才送出、webhook 名稱的限制、分享連結轉址
+- [ ] 實際測試：用公開的 S3 與 bot 網址，從網頁上傳到 Discord 顯示預覽（docs/tickets.md 第 17 節）
 
 ## 9. 關單、紀錄與評分
 
