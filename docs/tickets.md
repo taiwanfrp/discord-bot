@@ -169,7 +169,7 @@ flowchart TD
 
 | 對象 | 權限 |
 |---|---|
-| `@everyone` | 禁止查看 |
+| `@everyone` | 禁止查看、禁止建立討論串（討論串裡的訊息不會同步到網頁） |
 | bot | 查看、傳送、嵌入連結、讀取訊息紀錄、管理頻道、管理權限、管理 webhook |
 | 開單者、額外加入的成員 | 查看、傳送、附加檔案、讀取訊息紀錄 |
 | 該分類的分類身份組、管理員身份組 | 同上 |
@@ -202,9 +202,17 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
 1. `on_message`：只處理客服單頻道裡的訊息，並略過：
    - `message.webhook_id` 是這張客服單自己的 webhook 的訊息（那是從網頁送出的訊息，已經存過了）。
    - bot 自己送出的訊息（開單的 embed、閒置提醒等）。這些動作記錄在 `ticket_event`，不算是對話內容。
-2. 加密後存進 `ticket_message`，更新作者的快照（8.6），並更新 `ticket.last_message_at`。
-3. 附件：每個附件先存一筆 `pending` 的 `ticket_attachment`，再放入 worker 工作 `mirror_attachment`（下載後上傳到 S3）。**一定要上傳到 S3**，因為 Discord 的附件網址大約一天就會過期。
-4. 送出 SSE 事件 `message.created`。
+   - 系統訊息（釘選、加入討論串等），只處理一般訊息與回覆。
+   - bot 需要 **Message Content** 這個特權 intent（在 Developer Portal 開啟），否則收到的訊息內容與附件都是空的。
+2. 加密後存進 `ticket_message`，更新作者的快照（8.6）、`ticket.last_message_at`，並清除 `inactivity_reminded_at`（第 9 節）。同一則訊息重複收到時（`discord_message_id` 是唯一的）什麼都不做。
+3. 附件：每個附件存一筆 `ticket_attachment`，同時存下 Discord 的下載網址（`source_url`）。**一定要上傳到 S3**，因為 Discord 的附件網址大約一天就會過期。
+   - 副檔名或大小不符合（8.3）：直接記錄為 `rejected`，不放入工作。
+   - 符合：記錄為 `pending`，放入 worker 工作 `mirror_attachment`（下載後上傳到 S3）。
+   - worker 先用 `source_url` 下載；網址已經過期（`403`、`404`）時，才透過 REST API 重新取得訊息，拿到新的網址。訊息或頻道已經被刪除的話，記錄為 `failed`。所以傳了附件後馬上關單、頻道被刪除，附件也還來得及存下來。
+   - 同一個附件用鎖確保只有一個 worker 處理。取不到鎖時（另一個 worker 正在處理，或是它當機了、鎖還沒過期）丟出例外，讓 queue 稍後重試。
+   - 最後一次重試也失敗時記錄為 `failed`。
+   - 放入工作失敗的附件（例如當時 Redis 連不上），由 scheduler 每 10 分鐘執行的 `requeue_pending_attachments` 重新放入。
+4. 送出 SSE 事件 `message.created`。附件處理完（`done`、`rejected`、`failed`）時送出 `attachment.updated`，網頁更新附件的顯示。
 5. 編輯、刪除：用 `on_message_edit`、`on_message_delete` 更新資料庫，並送出對應的事件（第二階段再做）。
 
 ### 8.2 網頁 → Discord
@@ -224,7 +232,9 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
 
 - 大小上限：預設 **1 GB**，可以在網頁修改。
 - 允許的類型：預設為常見類型（圖片、影片、文件、壓縮檔），可以在網頁自訂。
-  - 檢查**副檔名**，加上**檔案開頭的 magic bytes**（用 `filetype` 或 `puremagic`，這兩個都是純 Python，不需要安裝系統套件）。
+  - 檢查**副檔名**，加上**檔案開頭的 magic bytes**（用 `filetype`，純 Python，不需要安裝系統套件；它最多看檔案開頭的 8192 bytes）。
+    - 純文字（txt、csv 等）沒有 magic bytes，偵測不到類型時只依照副檔名。
+    - 同一種容器格式不一定分得出來（例如 docx 可能被偵測成 zip）。偵測到的類型跟副檔名屬於同一組（zip、Office、OpenDocument；或舊版的 doc、xls、ppt），而且副檔名被允許時就接受。
   - Discord → S3：下載時就讀取開頭檢查，不符合的不上傳，記錄為 `rejected`。
   - 網頁 → S3：申請上傳網址時先檢查副檔名與大小；上傳完成後，worker 讀取物件開頭的幾個 bytes 再檢查一次，不符合就刪除並標記為 `rejected`。
 - **大檔案一律使用串流**：從 Discord 下載時一邊下載一邊用 multipart upload 上傳到 S3，不會把整個檔案讀進記憶體。
@@ -235,6 +245,7 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
 - 使用 **private bucket**，因為客服單裡可能有敏感的截圖。bucket 不公開，所有存取都透過 presigned URL。
 - 物件 key：附件是 `tickets/{ticket_id}/{attachment_id}/{filename}`，頭像是 `avatars/{user_id}/{avatar_hash}.{副檔名}`（8.6）。檔名由使用者決定，要先清理（移除路徑分隔符號、控制字元，並限制長度）；原始檔名另外存在資料庫，下載時用 `Content-Disposition` 還原。
 - bot 使用的 S3 金鑰只能存取這個 bucket。
+- bucket 要設定 lifecycle 規則，自動清除沒有完成的 multipart upload（`AbortIncompleteMultipartUpload`）。worker 上傳到一半被強制停止時，已經上傳的部分會留在 S3 上佔用空間。
 
 **presigned URL**：在網址裡附上簽章與有效期限的 S3 網址（AWS Signature Version 4，S3 相容的服務都支援）。bot 用自己的金鑰在本機算出簽章，不需要呼叫 S3；拿到網址的人可以在期限內直接向 S3 下載，檔案不經過 bot。
 
@@ -266,10 +277,14 @@ GET /a/<attachment_id>/<token>
 
 - `GET /tickets/{id}/events`：單一客服單的事件。
 - `GET /events`：客服單列表的變動（新開單、被接手、已關閉）。
-- 事件類型：`message.created`、`message.updated`、`message.deleted`、`ticket.created`、`ticket.claimed`、`ticket.unclaimed`、`ticket.transferred`、`ticket.member_added`、`ticket.member_removed`、`ticket.opener_added`（開單者加入伺服器後被加進頻道）、`ticket.inactivity_reminded`、`ticket.closed`、`ticket.rated`。
+- 事件類型：`message.created`、`message.updated`、`message.deleted`、`attachment.updated`（附件處理完，8.1）、`ticket.created`、`ticket.claimed`、`ticket.unclaimed`、`ticket.transferred`、`ticket.member_added`、`ticket.member_removed`、`ticket.opener_added`（開單者加入伺服器後被加進頻道）、`ticket.inactivity_reminded`、`ticket.closed`、`ticket.rated`。`GET /events` 只送 `ticket.*` 的事件。
 - **所有 SSE 事件都先寫入 `ticket_event`，再推送**（包括 `message.created` 這類訊息事件，`data` 只放 id）。事件的 `id` 就是 `ticket_event.id`。重新連線時，瀏覽器會自動送出 `Last-Event-ID`，伺服器從 `ticket_event` 補送之後的事件（只補送這個使用者有權限看的客服單）。
-- 每 25 秒送一次 heartbeat（SSE 註解行），避免 proxy 因為閒置而中斷連線。
-- worker 產生的事件（例如自動關閉）透過 Redis pub/sub 通知 bot 服務，再由 bot 推送給瀏覽器。
+  - 最多補送 1000 個事件。斷線太久的話，前端重新連線後應該重新載入資料。
+  - 事件的順序不一定跟 id 相同：id 在新增時就決定，兩個交易同時寫入時，比較小的 id 可能比較晚 commit。所以伺服器不會因為 id 比較小就略過事件，前端也可能重複收到同一個事件（重新連線時），要用事件的 id 去重。
+- 每 15 秒送一次 heartbeat（SSE 註解行，FastAPI 內建的 SSE 固定是這個間隔），避免 proxy 因為閒置而中斷連線。
+- 連線期間每 60 秒重新驗證一次 session 與權限（`docs/auth.md`）。失敗就結束連線，例如已經登出、被移除身份組。
+- SSE 連線不會一直佔用資料庫連線：只有補送、驗證、檢查權限時才短暫使用。
+- **`ticket_event` commit 之後會自動推送**（`bot/db/hooks.py`）：先透過 Redis pub/sub 通知 bot 服務，再由 bot 推送給瀏覽器。bot 和 worker 產生的事件（例如自動關閉）都走同一條路，不需要每個地方自己通知。
 
 ### 8.6 使用者快照（名稱與頭像）
 
@@ -286,12 +301,14 @@ GET /a/<attachment_id>/<token>
 
 - 使用伺服器頭像（有設定的話），否則使用帳號頭像，也就是 discord.py 的 `display_avatar`。
 - 伺服器頭像和帳號頭像在 Discord 上的網址格式不同，只存 hash 組不出原本的網址，所以快照另外存 Discord 的原始網址（`discord_avatar_url`）。
-- 由 worker 下載後存到 S3：`avatars/{user_id}/{avatar_hash}.{webp 或 gif}`（動態頭像存 gif）。
+- 由 scheduler 每分鐘放入 `mirror_avatars()`，worker 把所有還沒存到 S3 的頭像（`avatar_hash` 有值、`avatar_key` 是空的）一次處理掉，存到 `avatars/{user_id}/{avatar_hash}.{webp 或 gif}`（動態頭像存 gif）。更新快照的地方很多，用定時掃描的方式，就不需要每個地方都記得放入工作。
 - **用頭像的 hash 去重**：同一個頭像只下載一次。已經存在 S3 的就略過，所以同一個人開很多張單，也只會存一份。
+- 這只是把快照裡的頭像存起來，不會改變快照的內容，所以已關閉的客服單也會處理。
+- Discord 上已經取不到的頭像（`403`、`404`）或超過 10 MB 的，清除 `discord_avatar_url`，之後顯示預設頭像。
 - API 回傳使用者資料時，頭像依照下面的順序決定：
   1. `avatar_key` 有值：S3 的 presigned URL。
-  2. `avatar_hash` 有值，但頭像還沒存到 S3（`mirror_avatar` 還沒執行完）：先用 `discord_avatar_url`。
-  3. 都沒有：使用者沒有自訂頭像，前端依照 Discord 的規則顯示預設頭像。
+  2. `discord_avatar_url` 有值（頭像還沒存到 S3，最多等 1 分鐘）：先用 Discord 的網址。
+  3. 都沒有：使用者沒有自訂頭像，或頭像已經取不到，前端依照 Discord 的規則顯示預設頭像。
 
 ## 9. 閒置提醒與自動關閉
 
@@ -343,9 +360,10 @@ GET /a/<attachment_id>/<token>
 | 工作 | 由誰放入 |
 |---|---|
 | `mirror_attachment(attachment_id)`：從 Discord 串流下載，再上傳到 S3 | bot（`on_message`） |
+| `requeue_pending_attachments()`：重新放入沒有成功放進 queue 的 `mirror_attachment` | scheduler（每 10 分鐘） |
 | `verify_attachment(attachment_id)`：檢查網頁上傳的檔案類型 | bot（API 收到上傳完成） |
 | `deliver_messages(ticket_id)`：依照順序把網頁的訊息透過 webhook 送到 Discord | bot（API） |
-| `mirror_avatar(ticket_id, user_id)`：讀取快照，從 `discord_avatar_url` 下載頭像存到 S3，再寫入 `avatar_key`（S3 上已經有同一個 hash 的檔案就不下載） | 更新使用者快照時，頭像有變的話 |
+| `mirror_avatars()`：把還沒存到 S3 的頭像存起來，再寫入 `avatar_key`（S3 上已經有同一個 hash 的檔案就不下載，見 8.6） | scheduler（每分鐘） |
 | `send_close_notifications(ticket_id)`：關單後的私訊（連結、評分） | 關單的流程（bot 或 worker） |
 | `check_inactive_tickets()`：閒置提醒、自動關閉 | scheduler（每 5 分鐘） |
 | `sync_pending_openers()`：把已經加入伺服器的開單者加進頻道（補 `on_member_join` 錯過的事件） | scheduler（每 5 分鐘） |
@@ -380,7 +398,7 @@ GET /a/<attachment_id>/<token>
 - **實作**：寫一個 SQLAlchemy `TypeDecorator`（`EncryptedText`），讀寫時自動加解密，其他程式碼不需要知道有加密。
 - **金鑰**：只放在環境變數 `ENCRYPTION_KEYS`（逗號分隔，第一個是目前使用的金鑰），**不可以存進資料庫**。金鑰遺失，資料就無法還原，一定要另外備份。
 - **代價**：加密後的欄位無法在資料庫裡搜尋，也無法排序。要搜尋內容的話，只能另外建立索引。
-- **附件與頭像**：使用 S3 的伺服器端加密（SSE），應用程式層不另外加密。
+- **附件與頭像**：依靠 S3 服務本身的靜態加密，應用程式層不另外加密。bot 上傳時不帶伺服器端加密的參數，因為自架的 S3 相容服務在沒有設定金鑰管理（KMS）時會直接拒絕這種請求；大部分雲端的 S3 服務預設就會加密儲存的資料，自架的話要在儲存服務那邊開啟。
 - **使用者名稱（`ticket_user`）不加密**：名稱與頭像本來就是 Discord 上公開的資料，不加密才能用名稱搜尋客服單。
 
 ## 13. 資料表
@@ -434,7 +452,8 @@ ticket_message
 
 ticket_attachment
   id, ticket_id, message_id（網頁上傳時，送出訊息前是 null）, uploader_id
-  source（discord | web）, discord_attachment_id（worker 用來重新取得 Discord 的下載網址）, storage_key
+  source（discord | web）, discord_attachment_id（worker 用來重新取得 Discord 的下載網址）
+  source_url（Discord 的下載網址，會過期；過期時用 discord_attachment_id 重新取得）, storage_key
   filename, content_type, size
   status（pending | done | rejected | failed）, attempts
   share_token_hash（分享連結 token 的 SHA-256，只有網頁上傳的附件才有）, share_revoked_at
@@ -518,6 +537,7 @@ DATABASE_URL          例：sqlite+aiosqlite:///data/bot.db
 REDIS_URL             queue、事件通知、鎖、ticket session 共用（單一主節點，與 session store 分開）
 ENCRYPTION_KEYS       Fernet 金鑰，逗號分隔，第一個是目前使用的金鑰
 S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET
+                      S3_ENDPOINT 留空表示 AWS S3
 S3_PRESIGN_TTL        presigned URL 的有效期限（秒，預設 600）
 PUBLIC_BASE_URL       bot 對外的網址，用來組出分享連結（8.4.1）
 WEB_TICKET_URL        紀錄頁面網址的格式，例：https://.../tickets/{id}

@@ -10,7 +10,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.api.app import create_app
-from bot.api.deps import get_db
+from bot.api.deps import get_db, get_db_sessionmaker
+from bot.api.sse import EventHub
 from bot.core.redis import get_redis, get_session_redis
 from bot.db.base import Base
 from bot.db.engine import create_engine
@@ -36,8 +37,9 @@ async def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[
     bot = FakeBot()
     redis = FakeAsyncRedis(decode_responses=True)
     sessions = FakeAsyncRedis(decode_responses=True)
-    app = create_app(cast(commands.Bot, bot))
+    app = create_app(cast(commands.Bot, bot), EventHub(lambda: sessionmaker))
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_db_sessionmaker] = lambda: sessionmaker
     app.dependency_overrides[get_redis] = lambda: redis
     app.dependency_overrides[get_session_redis] = lambda: sessions
 

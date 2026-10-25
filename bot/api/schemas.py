@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 from pydantic import (
     AfterValidator,
@@ -203,6 +203,20 @@ class TicketOut(BaseModel):
     closed_at: datetime | None
     # null 表示系統自動關閉（關閉之後才有意義）
     closed_by_id: Snowflake | None
+
+
+class EventOut(BaseModel):
+    """SSE 事件的 data（ticket_event）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ticket_id: int
+    type: str
+    # null 表示系統
+    actor_id: Snowflake | None
+    data: dict[str, Any] | None
+    created_at: datetime
 
 
 class UserIdIn(BaseModel):

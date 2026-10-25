@@ -5,6 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.db.models import PermissionRole, RoleKind, Ticket
 
 # 權限覆寫（docs/tickets.md 6.3）
+# 討論串裡的訊息不會同步到網頁，所以不開放建立討論串
+EVERYONE_PERMISSIONS = discord.PermissionOverwrite(
+    view_channel=False, create_public_threads=False, create_private_threads=False
+)
 MEMBER_PERMISSIONS = discord.PermissionOverwrite(
     view_channel=True, send_messages=True, attach_files=True, read_message_history=True
 )

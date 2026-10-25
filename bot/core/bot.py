@@ -9,9 +9,10 @@ from discord.ext import commands
 
 from bot import cogs
 from bot.api.app import Server, create_server
+from bot.api.sse import EventHub
 from bot.core.redis import listen_events
 from bot.core.tree import CommandTree
-from bot.db.engine import get_engine
+from bot.db.engine import get_engine, get_sessionmaker
 from bot.tickets.controls import TicketControlsView
 from bot.tickets.panel import PanelView
 from bot.worker.broker import broker
@@ -21,8 +22,11 @@ log = logging.getLogger(__name__)
 
 class Bot(commands.Bot):
     def __init__(self) -> None:
+        # members、message_content 是特權 intent，要在 Developer Portal 開啟
         intents = discord.Intents.default()
         intents.members = True
+        # 沒有它的話，客服單頻道裡的訊息收到時內容與附件都是空的
+        intents.message_content = True
         super().__init__(
             command_prefix=commands.when_mentioned,
             help_command=None,
@@ -34,6 +38,8 @@ class Bot(commands.Bot):
         self._api_server: Server | None = None
         self._api_task: asyncio.Task[None] | None = None
         self._close_task: asyncio.Task[None] | None = None
+        # 把事件推送給連線中的 SSE
+        self.event_hub = EventHub(get_sessionmaker)
 
     async def setup_hook(self) -> None:
         # 部署平台用 SIGTERM 停止服務，要正常關閉 API、queue 與資料庫連線
@@ -42,9 +48,7 @@ class Bot(commands.Bot):
         # 讓 bot 可以把工作放進 queue
         await broker.startup()
         # worker 產生的事件，在 cog 裡用 on_ticket_event(event_id) 接收
-        self._events_task = asyncio.create_task(
-            listen_events(lambda event_id: self.dispatch("ticket_event", event_id))
-        )
+        self._events_task = asyncio.create_task(listen_events(self._on_ticket_event))
 
         # persistent view：bot 重啟後，已經送出的面板還能使用
         self.add_view(PanelView())
@@ -58,8 +62,13 @@ class Bot(commands.Bot):
         synced = await self.tree.sync()
         log.info("Synced %d global commands", len(synced))
 
-        self._api_server = create_server(self)
+        self._api_server = create_server(self, self.event_hub)
         self._api_task = asyncio.create_task(self._api_server.serve())
+
+    def _on_ticket_event(self, event_id: int) -> None:
+        """bot 與 worker 寫入的 ticket_event（bot/db/hooks.py 透過 Redis pub/sub 通知）。"""
+        self.event_hub.publish(event_id)
+        self.dispatch("ticket_event", event_id)
 
     def _on_sigterm(self) -> None:
         log.info("Received SIGTERM, shutting down")
@@ -69,6 +78,8 @@ class Bot(commands.Bot):
         # SIGTERM 與 discord.py 結束時都會呼叫
         if self.is_closed():
             return
+        # 先結束 SSE 的長連線，uvicorn 才不用等它們逾時
+        self.event_hub.close()
         if self._api_server is not None and self._api_task is not None:
             self._api_server.should_exit = True
             await self._api_task

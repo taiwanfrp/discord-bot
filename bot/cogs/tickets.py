@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
+from taskiq.exceptions import SendTaskError
 
 from bot.core.cog import Cog
 from bot.core.config import get_settings
@@ -14,7 +15,9 @@ from bot.db.engine import get_sessionmaker
 from bot.db.models import Ticket, TicketStatus
 from bot.tickets import actions
 from bot.tickets.errors import TicketError
+from bot.tickets.messages import save_discord_message
 from bot.tickets.open import add_opener, pending_openers_query
+from bot.worker.tasks import mirror_attachment
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +89,36 @@ class Tickets(Cog):
             await interaction.response.send_message("正在關閉客服單……", ephemeral=True)
             with user_errors():
                 await actions.close(db, guild, ticket, actor, reason)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """客服單頻道裡的訊息在送出的當下就加密存進資料庫（docs/tickets.md 8.1）。"""
+        if message.guild is None or message.guild.id != get_settings().guild_id:
+            return
+        # bot 自己的訊息（開單的 embed、說明訊息）記錄在 ticket_event，不算對話內容
+        if self.bot.user is not None and message.author.id == self.bot.user.id:
+            return
+        # 釘選、加入討論串等系統訊息
+        if message.type not in (discord.MessageType.default, discord.MessageType.reply):
+            return
+        async with get_sessionmaker()() as db:
+            ticket = await db.scalar(
+                select(Ticket).where(
+                    Ticket.channel_id == message.channel.id, Ticket.status == TicketStatus.OPEN
+                )
+            )
+            if ticket is None:
+                return
+            # 從網頁送出的訊息（這張單自己的 webhook）已經存過了
+            if message.webhook_id is not None and message.webhook_id == ticket.webhook_id:
+                return
+            attachment_ids = await save_discord_message(db, ticket, message)
+        for attachment_id in attachment_ids:
+            try:
+                await mirror_attachment.kiq(attachment_id)
+            except SendTaskError:
+                # requeue_pending_attachments 之後會補放
+                log.exception("Failed to queue mirror_attachment %d", attachment_id)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:

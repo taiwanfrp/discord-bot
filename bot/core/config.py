@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     redis_url: str
     encryption_keys: SecretStr
 
+    # S3 相容儲存（docs/tickets.md 8.4）；endpoint 是 None 時使用 AWS
+    s3_endpoint: str | None = None
+    s3_region: str = "us-east-1"
+    s3_access_key_id: str
+    s3_secret_access_key: SecretStr
+    s3_bucket: str
+    # presigned URL 的有效期限（秒）
+    s3_presign_ttl: int = 600
+
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     # 逗號分隔
@@ -22,6 +31,12 @@ class Settings(BaseSettings):
     session_redis_url: str
     auth_cookie_name: str = "__Host-ticket_session"
     ticket_session_ttl: int = 3 * 24 * 60 * 60
+
+    @field_validator("s3_endpoint", mode="before")
+    @classmethod
+    def _empty_is_none(cls, value: object) -> object:
+        # S3_ENDPOINT= 留空表示使用 AWS
+        return None if value == "" else value
 
     @field_validator("api_cors_origins", mode="before")
     @classmethod

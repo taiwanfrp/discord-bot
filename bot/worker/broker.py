@@ -1,8 +1,8 @@
 import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 import discord
-from taskiq import TaskiqDepends, TaskiqEvents, TaskiqMessage, TaskiqState
+from taskiq import Context, TaskiqDepends, TaskiqEvents, TaskiqMessage, TaskiqState
 from taskiq.middlewares import SmartRetryMiddleware
 from taskiq.serializers import JSONSerializer
 from taskiq_redis import ListRedisScheduleSource, RedisStreamBroker
@@ -36,6 +36,9 @@ class RetryMiddleware(SmartRetryMiddleware):
         return min(delay, self.max_delay_exponent)
 
 
+# 每個工作最多執行幾次（第一次加上重試）
+MAX_ATTEMPTS = 6
+
 settings = get_settings()
 
 schedule_source = ScheduleSource(
@@ -61,7 +64,7 @@ broker = RedisStreamBroker(
     maxlen=10_000,
 ).with_middlewares(
     RetryMiddleware(
-        default_retry_count=6,
+        default_retry_count=MAX_ATTEMPTS,
         default_retry_label=True,
         default_delay=60,
         max_delay_exponent=60 * 60,
@@ -92,3 +95,13 @@ def _get_discord(state: Annotated[TaskiqState, TaskiqDepends()]) -> discord.Clie
 # 工作的參數：`discord_client: discord.Client = DiscordDep`。用預設值的寫法，
 # 放入 queue 時（`.kiq()`）才不需要傳這個參數；不要命名為 discord，會蓋掉 discord 模組
 DiscordDep = TaskiqDepends(_get_discord)
+
+
+def is_last_attempt(context: Context) -> bool:
+    """這次失敗之後就不會再重試了。工作可以用它在最後一次失敗時，把資料標記為 failed。"""
+    retries = int(context.message.labels.get("_retries", 0))
+    return retries + 1 >= int(context.message.labels.get("max_retries", MAX_ATTEMPTS))
+
+
+# 工作的參數：`context: Context = ContextDep`（依照型別注入目前的 Context）
+ContextDep: Any = TaskiqDepends()

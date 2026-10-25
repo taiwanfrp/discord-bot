@@ -8,15 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from bot.api.csrf import CSRFMiddleware
 from bot.api.deps import BotDep, UserCache
-from bot.api.routes import auth, categories, guild, panel, permission_roles, tickets
+from bot.api.routes import auth, categories, events, guild, panel, permission_roles, tickets
 from bot.api.routes import settings as settings_routes
+from bot.api.sse import EventHub
 from bot.core.config import get_settings
 
 
-def create_app(bot: commands.Bot) -> FastAPI:
+def create_app(bot: commands.Bot, event_hub: EventHub) -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="TaiwanFRP Ticket Bot")
     app.state.bot = bot
+    app.state.event_hub = event_hub
     app.state.user_cache = UserCache()
 
     # 後加入的 middleware 在外層：CORS 先處理 preflight，再檢查 CSRF
@@ -29,7 +31,16 @@ def create_app(bot: commands.Bot) -> FastAPI:
         allow_headers=["Content-Type", "Last-Event-ID"],
     )
 
-    for module in (auth, guild, settings_routes, categories, permission_roles, panel, tickets):
+    for module in (
+        auth,
+        guild,
+        settings_routes,
+        categories,
+        permission_roles,
+        panel,
+        tickets,
+        events,
+    ):
         app.include_router(module.router)
 
     @app.get("/health")
@@ -48,10 +59,10 @@ class Server(uvicorn.Server):
         yield
 
 
-def create_server(bot: commands.Bot) -> Server:
+def create_server(bot: commands.Bot, event_hub: EventHub) -> Server:
     settings = get_settings()
     config = uvicorn.Config(
-        create_app(bot),
+        create_app(bot, event_hub),
         host=settings.api_host,
         port=settings.api_port,
         # 只信任自己的 proxy 送來的 X-Forwarded-For（docs/auth.md 第 8 節）

@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bot.db.base import Base, Snowflake
@@ -192,6 +192,8 @@ class TicketAttachment(Base):
     source: Mapped[Source]
     # Discord 的附件 id，worker 用來重新取得下載網址（Discord 的網址會過期）
     discord_attachment_id: Mapped[Snowflake | None]
+    # Discord 的附件網址（約 24 小時後過期，過期後 worker 改用 discord_attachment_id 重新取得）
+    source_url: Mapped[str | None] = mapped_column(Text)
     storage_key: Mapped[str | None] = mapped_column(String(1024))
     filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str | None] = mapped_column(String(255))

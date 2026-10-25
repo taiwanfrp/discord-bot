@@ -7,6 +7,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
 
+import bot.db.hooks  # noqa: F401  註冊 commit 之後推送 ticket_event 的 hook
 from bot.core.config import get_settings
 
 

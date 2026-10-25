@@ -107,3 +107,9 @@ def test_build_access() -> None:
     assert build_access(
         [PermissionRole(role_id=1, kind=RoleKind.ADMIN)], is_guild_admin=False
     ).is_admin
+
+
+async def test_event_streams_require_login_and_access(env: Env) -> None:
+    assert (await env.client.get("/events")).status_code == 401
+    await env.login()
+    assert (await env.client.get("/tickets/999/events")).status_code == 404

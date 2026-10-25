@@ -84,14 +84,15 @@
 - [x] 每個操作都寫入 `ticket_event`
 - [x] 客服單頻道在 Discord 上被直接刪除時，把客服單標記為關閉（`on_guild_channel_delete`）
 - [x] 實際測試：API 的接手、釋放、附原因關單，worker 同步權限覆寫
-- [ ] 實際測試：在 Discord 上按按鈕（關閉的確認、附原因關閉的 Modal、接手與釋放）與 `/ticket` 指令
+- [x] 實際測試：在 Discord 上按按鈕（關閉的確認、附原因關閉的 Modal、接手與釋放）與 `/ticket` 指令
 
 ## 7. Discord → 網頁同步
 
-- [ ] `on_message` 加密後保存訊息，更新 `last_message_at`（略過自己的 webhook）
-- [ ] 使用者快照：每次有動作時更新 `ticket_user`（關單後不再更新）；`mirror_avatar` 把頭像存到 S3，用 hash 去重；還沒存好之前先用 Discord 的頭像網址
-- [ ] `mirror_attachment`：串流下載後用 multipart upload 上傳到 S3，並檢查檔案類型
-- [ ] SSE：`GET /tickets/{id}/events`、`GET /events`；所有事件先寫入 `ticket_event`，支援 `Last-Event-ID` 補送和 heartbeat
+- [x] `on_message` 加密後保存訊息，更新 `last_message_at`（略過自己的 webhook）；開啟 Message Content intent
+- [x] 使用者快照：每次有動作時更新 `ticket_user`（關單後不再更新）；scheduler 每分鐘放入 `mirror_avatars` 把頭像存到 S3，用 hash 去重；還沒存好之前先用 Discord 的頭像網址
+- [x] `mirror_attachment`：串流下載後用 multipart upload 上傳到 S3，並檢查檔案類型；`requeue_pending_attachments` 補放沒放進 queue 的附件
+- [x] SSE：`GET /tickets/{id}/events`、`GET /events`；所有事件先寫入 `ticket_event`（commit 後自動推送），支援 `Last-Event-ID` 補送和 heartbeat
+- [x] 實際測試：在客服單頻道傳訊息與附件（圖片、偽裝的執行檔、超過 8 MiB 的檔案），頭像存到 Silo，SSE 收到事件、補送與重新驗證
 
 ## 8. 網頁 → Discord 同步
 

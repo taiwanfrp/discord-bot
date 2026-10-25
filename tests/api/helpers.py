@@ -67,6 +67,17 @@ def make_category_channel(channel_id: int, name: str = "客服單") -> MagicMock
     return channel
 
 
+class FakeAsset:
+    """discord.Asset：快照只會用到 key、url 和 replace()。"""
+
+    def __init__(self, key: str, url: str) -> None:
+        self.key = key
+        self.url = url
+
+    def replace(self, **_: Any) -> "FakeAsset":
+        return self
+
+
 def _fill_user(user: MagicMock, user_id: int) -> MagicMock:
     user.id = user_id
     user.name = "user"
@@ -74,7 +85,7 @@ def _fill_user(user: MagicMock, user_id: int) -> MagicMock:
     user.mention = f"<@{user_id}>"
     user.display_name = "user"
     user.bot = False
-    user.avatar = SimpleNamespace(key="avatarhash", url="https://cdn.discordapp.com/a.png")
+    user.avatar = FakeAsset("avatarhash", "https://cdn.discordapp.com/avatars/a.webp")
     user.display_avatar = user.avatar
     return user
 

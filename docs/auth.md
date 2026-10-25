@@ -230,7 +230,7 @@ Discord ID 在 JSON 與 Redis 裡一律用**字串**。snowflake 超過 JavaScri
 
 SSE 是長時間保持的連線，中間的每一層 proxy 都要能正常串流：
 
-- **heartbeat**：每 25 秒送一次 SSE 註解行。很多 CDN 和 proxy 會中斷閒置超過 60～100 秒的連線。
+- **heartbeat**：每 15 秒送一次 SSE 註解行（FastAPI 內建的 SSE 固定是這個間隔）。很多 CDN 和 proxy 會中斷閒置超過 60～100 秒的連線。
 - proxy 的 timeout 要大於 heartbeat 的間隔；`text/event-stream` 不要壓縮，也不要緩衝。
 - 回應 header：`Content-Type: text/event-stream`、`Cache-Control: no-cache`。
 

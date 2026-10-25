@@ -9,5 +9,20 @@ services:
     volumes:
       - redis-data:/data
 
+  # S3 相容儲存（MinIO 的社群分支）。管理介面：http://localhost:9001
+  silo:
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    command: server /data --console-address ":9001"
+    environment:
+      # 只用於本機開發；.env 的 S3_ACCESS_KEY_ID、S3_SECRET_ACCESS_KEY 也用這組
+      MINIO_ROOT_USER: ticket-bot
+      MINIO_ROOT_PASSWORD: ticket-bot-dev-password
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - silo-data:/data
+
 volumes:
   redis-data:
+  silo-data:

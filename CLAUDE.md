@@ -16,7 +16,8 @@ TaiwanFRP 的 Discord bot，只服務單一伺服器。主要功能是客服單�
 
 ```bash
 uv sync                              # 安裝依賴
-docker compose up -d                 # 本機開發用的 Redis
+docker compose up -d                 # 本機開發用的 Redis、Silo（S3）
+uv run python -m bot.storage.create_bucket   # 建立本機開發用的 bucket（第一次啟動 Silo 後）
 uv run main.py                       # 啟動 bot
 uv run taskiq worker bot.worker.broker:broker bot.worker.tasks --workers 1   # 啟動 worker
 uv run taskiq scheduler bot.worker.scheduler:scheduler bot.worker.tasks     # 啟動 scheduler（重試也靠它）
@@ -38,12 +39,13 @@ main.py              # 入口：讀取設定並啟動 bot
 bot/
 ├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command、啟動 API）、設定、Redis 與事件通知、權限、Cog 基底類別、CommandTree（錯誤處理）
 ├── api/             # HTTP API（FastAPI，跟 bot 在同一個程序）：routes、dependencies、CSRF
-├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session
+├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session、commit 後推送 ticket_event 的 hook
+├── storage/         # S3（aiobotocore）、附件的檔案規則（副檔名、magic bytes、key）、附件與頭像存到 S3
 ├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式
 ├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 migrations/          # Alembic migration
-tests/               # tests/api/：API 測試（helpers.py 有假的 bot、伺服器與登入）；測試一律用 fakeredis，不可以連到真的 Redis
+tests/               # tests/api/：API 測試（helpers.py 有假的 bot、伺服器與登入）；測試一律用 fakeredis，不可以連到真的 Redis 或 S3
 docs/tickets.md      # 客服單系統設計
 docs/auth.md         # 身分驗證
 TODO.md
@@ -52,6 +54,7 @@ TODO.md
 ## 程式慣例
 
 - Python 3.12，所有函式都要有型別標註，必須通過 `mypy --strict`。
+- bot 使用 `members`、`message_content` 兩個特權 intent（Developer Portal 要開啟）。
 - 只使用 slash command，不使用前綴指令。指令是**全域同步**，伺服器與私訊都可用；只能在伺服器使用的指令加 `@app_commands.guild_only()`。
 - `bot/cogs/` 底下的每個模組都必須有 `async def setup(bot)`，因為 `pkgutil.iter_modules` 會全部載入。輔助程式放在 `bot/core/` 或其他套件，不要放進 `cogs/`。
 - cog 繼承 `bot.core.cog.Cog`（已提供 `self.bot`）。
@@ -94,6 +97,7 @@ TODO.md
 - queue 與鎖使用單一主節點的 Redis（`REDIS_URL`），不可以放在多主架構的 session store 上。
 - 工作寫在 `bot/worker/tasks.py`，用 `@broker.task` 定義；需要 Discord 時加上參數 `discord_client: discord.Client = DiscordDep`（`bot.worker.broker`，只有 REST API，沒有快取）。要用預設值的寫法，`.kiq()` 才不需要傳這個參數；不要命名為 `discord`，會蓋掉 `discord` 模組。
 - 失敗的工作會自動重試，間隔 1、2、4、8、16 分鐘，由 scheduler 放回 queue。不需要重試的錯誤要自己處理掉，不要丟出例外。
-- 工作執行超過 30 分鐘還沒結束，會被其他 worker 接手重新執行（`idle_timeout`）。可能超過的工作要先取得鎖，避免同時執行兩次。
-- worker 要通知 bot 時（例如推送 SSE），先寫入 `ticket_event`，再呼叫 `bot.core.redis.publish_event(event_id)`；bot 的 cog 用 `on_ticket_event(event_id)` 接收。
+- 最後一次重試也失敗時要做的處理（例如標記為 `failed`）：加上參數 `context: Context = ContextDep`，用 `is_last_attempt(context)` 判斷（`bot.worker.broker`）。
+- 工作執行超過 30 分鐘還沒結束，會被其他 worker 接手重新執行（`idle_timeout`）。可能超過的工作要先取得鎖，避免同時執行兩次。取不到鎖時要丟出例外讓它稍後重試，不要直接結束：持有鎖的 worker 可能已經當機，直接結束的話工作會被 ack，就再也不會執行（scheduler 定時執行的掃描工作可以直接結束，下一次會補上）。
+- `ticket_event` 一律用 ORM 新增（`db.add(TicketEvent(...))`），commit 之後會自動透過 Redis 通知 bot 並推送 SSE（`bot/db/hooks.py`），bot 與 worker 都一樣，不要自己呼叫 `publish_event`。用 `insert()` 等 Core 語法新增的不會推送。bot 的 cog 用 `on_ticket_event(event_id)` 接收。
 - 例外的 key：taskiq-redis 會使用 `autoclaim:ticket-bot:worker:ticket-bot:queue` 當作鎖，設定 Redis ACL 時要一併允許。

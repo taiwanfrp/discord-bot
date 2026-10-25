@@ -21,7 +21,12 @@ from bot.tickets.channel_name import render_channel_name
 from bot.tickets.controls import TicketControlsView, claim_text
 from bot.tickets.errors import TicketError
 from bot.tickets.log import opened_log, send_log
-from bot.tickets.permissions import BOT_PERMISSIONS, MEMBER_PERMISSIONS, staff_role_ids
+from bot.tickets.permissions import (
+    BOT_PERMISSIONS,
+    EVERYONE_PERMISSIONS,
+    MEMBER_PERMISSIONS,
+    staff_role_ids,
+)
 from bot.tickets.snapshot import update_snapshot
 
 log = logging.getLogger(__name__)
@@ -166,7 +171,7 @@ async def build_overwrites(
     overwrites: dict[
         discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite
     ] = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        guild.default_role: EVERYONE_PERMISSIONS,
         guild.me: BOT_PERMISSIONS,
     }
     for role_id in await staff_role_ids(db, category.id):

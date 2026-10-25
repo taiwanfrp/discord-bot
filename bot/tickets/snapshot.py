@@ -32,8 +32,11 @@ async def update_snapshot(
     row.nickname = member.nick if member else None
     if row.avatar_hash != (avatar.key if avatar else None):
         row.avatar_hash = avatar.key if avatar else None
-        row.discord_avatar_url = avatar.url if avatar else None
-        # 頭像換了，舊的 S3 檔案不再使用（mirror_avatar 會存新的）
+        # 靜態頭像用 webp、動態頭像用 gif（mirror_avatars 存到 S3 的格式也一樣）
+        row.discord_avatar_url = (
+            avatar.replace(size=256, static_format="webp").url if avatar else None
+        )
+        # 頭像換了，舊的 S3 檔案不再使用（mirror_avatars 會存新的）
         row.avatar_key = None
     row.role_name = role.name if role else None
     row.role_color = role.color.value if role else None

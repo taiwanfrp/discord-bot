@@ -9,8 +9,9 @@ from discord.ext import commands
 from fastapi import Depends, HTTPException, Request
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from bot.api.sse import EventHub
 from bot.core.config import get_settings
 from bot.core.permissions import Access, get_access
 from bot.core.redis import get_redis, get_session_redis
@@ -35,9 +36,21 @@ async def get_db() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+def get_db_sessionmaker() -> async_sessionmaker[AsyncSession]:
+    """給 SSE 這種長時間的連線用：需要時才開 session，不在整個連線期間佔用。"""
+    return get_sessionmaker()
+
+
+def get_event_hub(request: Request) -> EventHub:
+    hub: EventHub = request.app.state.event_hub
+    return hub
+
+
 BotDep = Annotated[commands.Bot, Depends(get_bot)]
 GuildDep = Annotated[discord.Guild, Depends(get_guild)]
 DBDep = Annotated[AsyncSession, Depends(get_db)]
+SessionmakerDep = Annotated[async_sessionmaker[AsyncSession], Depends(get_db_sessionmaker)]
+HubDep = Annotated[EventHub, Depends(get_event_hub)]
 RedisDep = Annotated[Redis, Depends(get_redis)]
 SessionRedisDep = Annotated[Redis, Depends(get_session_redis)]
 
