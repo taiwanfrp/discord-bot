@@ -26,7 +26,7 @@ from bot.db.types import utcnow
 from bot.storage import mirror, uploads
 from bot.storage.s3 import s3_client
 from bot.storage.status import finish
-from bot.tickets import delivery
+from bot.tickets import delivery, notifications
 from bot.tickets.open import add_opener, pending_openers_query
 from bot.tickets.permissions import staff_role_ids, sync_role_overwrites
 from bot.worker.broker import ContextDep, DiscordDep, broker, is_last_attempt
@@ -133,6 +133,41 @@ async def deliver_messages(
         await delivery.deliver_messages(
             db, get_redis(), discord_client, ticket_id, last_attempt=is_last_attempt(context)
         )
+
+
+@broker.task
+async def send_close_notifications(
+    ticket_id: int,
+    discord_client: discord.Client = DiscordDep,
+    context: Context = ContextDep,
+) -> None:
+    """關單後私訊開單者（紀錄的連結與評分按鈕）與接手的人（紀錄的連結）。"""
+    async with get_sessionmaker()() as db:
+        await notifications.send_close_notifications(
+            db, get_redis(), discord_client, ticket_id, last_attempt=is_last_attempt(context)
+        )
+
+
+@broker.task(schedule=[{"cron": "*/10 * * * *"}])
+async def requeue_close_notifications() -> None:
+    """補放入 send_close_notifications（關單之後、放入 queue 之前中斷時）。
+
+    只補一天內關閉的單：太久以前的私訊已經沒有意義。
+    """
+    now = utcnow()
+    async with get_sessionmaker()() as db:
+        ticket_ids = list(
+            await db.scalars(
+                select(Ticket.id).where(
+                    Ticket.status == TicketStatus.CLOSED,
+                    Ticket.close_notified_at.is_(None),
+                    Ticket.closed_at < now - timedelta(minutes=10),
+                    Ticket.closed_at > now - timedelta(days=1),
+                )
+            )
+        )
+    for ticket_id in ticket_ids:
+        await send_close_notifications.kiq(ticket_id)
 
 
 @broker.task(schedule=[{"cron": "* * * * *"}])

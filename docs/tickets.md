@@ -299,7 +299,7 @@ GET /a/<attachment_id>/<token>
 
 - `GET /tickets/{id}/events`：單一客服單的事件。
 - `GET /events`：客服單列表的變動（新開單、被接手、已關閉）。
-- 事件類型：`message.created`、`message.updated`（網頁訊息送到 Discord 的結果 `delivery_status`，8.2；之後也用在訊息編輯）、`message.deleted`、`attachment.updated`（附件處理完，8.1、8.2）、`ticket.created`、`ticket.claimed`、`ticket.unclaimed`、`ticket.transferred`、`ticket.member_added`、`ticket.member_removed`、`ticket.opener_added`（開單者加入伺服器後被加進頻道）、`ticket.inactivity_reminded`、`ticket.closed`、`ticket.rated`。`GET /events` 只送 `ticket.*` 的事件。
+- 事件類型：`message.created`、`message.updated`（網頁訊息送到 Discord 的結果 `delivery_status`，8.2；之後也用在訊息編輯）、`message.deleted`、`attachment.updated`（附件處理完，8.1、8.2）、`ticket.created`、`ticket.claimed`、`ticket.unclaimed`、`ticket.transferred`、`ticket.member_added`、`ticket.member_removed`、`ticket.opener_added`（開單者加入伺服器後被加進頻道）、`ticket.inactivity_reminded`、`ticket.closed`、`ticket.rated`、`notification.sent`、`notification.failed`（關單私訊的結果，第 10 節）。`GET /events` 只送 `ticket.*` 的事件。
 - **所有 SSE 事件都先寫入 `ticket_event`，再推送**（包括 `message.created` 這類訊息事件，`data` 只放 id）。事件的 `id` 就是 `ticket_event.id`。重新連線時，瀏覽器會自動送出 `Last-Event-ID`，伺服器從 `ticket_event` 補送之後的事件（只補送這個使用者有權限看的客服單）。
   - 最多補送 1000 個事件。斷線太久的話，前端重新連線後應該重新載入資料。
   - 事件的順序不一定跟 id 相同：id 在新增時就決定，兩個交易同時寫入時，比較小的 id 可能比較晚 commit。所以伺服器不會因為 id 比較小就略過事件，前端也可能重複收到同一個事件（重新連線時），要用事件的 id 去重。
@@ -349,20 +349,27 @@ GET /a/<attachment_id>/<token>
 1. 更新 `status=closed`、`closed_at`、`closed_by_id`、`close_reason`（自動關閉時記錄為系統）。
 2. 送出 SSE 事件 `ticket.closed`，並在 log 頻道送出通知（如果有設定；開單時也會通知）。
 3. 刪除頻道，webhook 會跟著被刪除。同時**撤銷這張客服單所有的分享連結**（設定 `share_revoked_at`）：頻道刪除後已經沒有人需要它們，就算連結事先被複製出去，關單後也打不開。紀錄頁面不受影響，網頁看附件是用需要登入的 `GET /attachments/{attachment_id}`。
-4. worker 送出私訊：
-   - **開單者**：紀錄頁面的連結 + 「評分」按鈕。
-   - **接手的人**（如果有）：紀錄頁面的連結。
-   - 對方關閉私訊、或不在伺服器裡時，在 `ticket_event` 記錄送出失敗，不重試。這種情況下，使用者在網頁上一樣可以看到紀錄並評分。
-5. 紀錄頁面：前端透過 `GET /tickets/{id}`、`GET /tickets/{id}/messages` 取得資料後顯示，bot 不產生 HTML。
+4. 放入 worker 工作 `send_close_notifications`，送出私訊（embed：分類、關閉者、主旨、關閉原因）：
+   - **開單者**：「查看紀錄」（紀錄頁面的連結，`WEB_TICKET_URL`）+ 「評分」按鈕。
+   - **接手的人**（如果有）：「查看紀錄」。
+   - 關閉者用關單當時的快照顯示名稱（私訊裡的 `<@id>` 不一定顯示得出名稱）；系統關閉時顯示「系統」。
+   - 每個收件人送出後各記錄一筆 `notification.sent`，重試時略過已經送過的人。送出之後、記錄之前 worker 當機的話，重試會再送一次（至少送一次）。
+   - 對方關閉私訊、沒有共同的伺服器、帳號已刪除（Discord 回傳 `4xx`，`429` 除外）時，記錄 `notification.failed`（`data` 有 Discord 的錯誤代碼），不重試。其他錯誤會重試，最後一次也失敗時一樣記錄 `notification.failed`。這種情況下，使用者在網頁上一樣可以看到紀錄並評分。
+   - 所有收件人都處理完後，寫入 `ticket.close_notified_at`。放入 queue 失敗的（例如當時 Redis 連不上），由 scheduler 每 10 分鐘執行的 `requeue_close_notifications` 補放：只補關單超過 10 分鐘、一天以內的單，太久以前的私訊已經沒有意義。
+   - 同一張單用鎖確保只有一個 worker 在送，取不到鎖時稍後重試。
+5. 紀錄頁面：前端透過 `GET /tickets/{id}`、`GET /tickets/{id}/messages` 取得資料後顯示，bot 不產生 HTML。附件用 `download_url`（presigned URL），過期後用 `GET /attachments/{id}` 重新取得。
 6. **已關閉的客服單不能重新開啟**，需要時請開新單。
 
 ### 10.1 評分
 
 - 按下私訊裡的「評分」按鈕，跳出 Modal，裡面有兩個欄位：
-  - **分數**：短文字，必填，只接受 `1`～`5`。送出時驗證，不符合就回覆錯誤訊息，請使用者重新評分。
-  - **評語**：長文字，選填。
+  - **分數**：短文字，必填，只接受 `1`～`5`（全形數字也可以）。送出時驗證，不符合就回覆錯誤訊息，請使用者再按一次按鈕重新評分。
+  - **評語**：長文字，選填，最多 1000 字。
+- 按鈕的 `custom_id` 是 `ticket:rate:{客服單 id}`（discord.py 的 `DynamicItem`），bot 重新啟動後，舊的私訊按鈕也還能用。
+- 評分成功後，私訊裡的「評分」按鈕會被拿掉，只留下「查看紀錄」。
 - 網頁也可以透過 `PUT /tickets/{id}/rating` 評分，內容相同。
-- 每張客服單只能評分一次。已經評分過的話，再按私訊裡的按鈕，會回覆「已經評分過了」。
+- 每張客服單只能評分一次。已經評分過的話（包括先在網頁評分），再按私訊裡的按鈕，會回覆「已經評分過了」。網頁與 Discord 同時送出時，用帶條件的 UPDATE 確保只有一個成功。
+- 評分會送出 SSE 事件 `ticket.rated`。評分與評語只有開單者與這個分類的客服看得到，額外加入的成員看不到。
 - 之後可以考慮：Discord 已經支援在 Modal 裡放下拉選單，確認 discord.py 支援之後，分數可以改成下拉選單，就不需要另外驗證。
 
 ## 11. 背景工作（queue）
@@ -389,6 +396,7 @@ GET /a/<attachment_id>/<token>
 | `requeue_pending_messages()`：重新放入超過 10 分鐘還沒送出的訊息的 `deliver_messages` | scheduler（每 10 分鐘） |
 | `mirror_avatars()`：把還沒存到 S3 的頭像存起來，再寫入 `avatar_key`（S3 上已經有同一個 hash 的檔案就不下載，見 8.6） | scheduler（每分鐘） |
 | `send_close_notifications(ticket_id)`：關單後的私訊（連結、評分） | 關單的流程（bot 或 worker） |
+| `requeue_close_notifications()`：重新放入一天內關閉、私訊還沒處理完的 `send_close_notifications` | scheduler（每 10 分鐘） |
 | `check_inactive_tickets()`：閒置提醒、自動關閉 | scheduler（每 5 分鐘） |
 | `sync_pending_openers()`：把已經加入伺服器的開單者加進頻道（補 `on_member_join` 錯過的事件） | scheduler（每 5 分鐘） |
 | `sync_ticket_permissions()`：讓開啟中客服單頻道的身份組權限覆寫，跟權限身份組的設定一致 | bot（API 修改權限身份組後） |
@@ -454,6 +462,7 @@ ticket
   claimed_by_id, claimed_at
   last_message_at, inactivity_reminded_at, created_at
   closed_at, closed_by_id（null 表示系統自動關閉）, 🔒close_reason
+  close_notified_at（關單私訊都處理完的時間，null 表示還沒）
   rating（1–5）, 🔒feedback, rated_at
 
 ticket_user（客服單裡每個人的快照，見 8.6）
@@ -494,6 +503,7 @@ ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
 - `ticket(channel_id)`（唯一）：按鈕和 `on_message` 用頻道查客服單。
 - `ticket(status, last_message_at)`：掃描閒置的客服單。
 - `ticket(status, opener_added_at)`：找出開單者還沒加進頻道的客服單。
+- `ticket(status, closed_at)`：找出私訊還沒處理完的客服單。
 - `ticket_message(ticket_id, id)`、`ticket_event(ticket_id, id)`：依照順序分頁讀取、SSE 補送。
 
 ## 14. API
@@ -501,7 +511,10 @@ ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
 - bot 有自己的網域，endpoint 直接放在根路徑底下。
 - 除了 `GET /health`、`POST /auth/exchange`、`GET /a/{attachment_id}/{token}` 以外，所有 endpoint 都需要登入（bot 的 cookie），權限依照第 4 節判斷。
 - Discord ID 在 JSON 裡一律用**字串**，因為 snowflake 超過 JavaScript 的安全整數範圍。
-- 列表類的 endpoint（客服單、訊息）使用 cursor 分頁（`?before=<id>&limit=50`），不用 offset：訊息一直在增加，用 offset 會漏掉或重複。
+- 列表類的 endpoint（客服單、訊息）使用 cursor 分頁（`?before=<id>&limit=50`，`limit` 最多 100），不用 offset：訊息一直在增加，用 offset 會漏掉或重複。
+  - `GET /tickets`：新的在前面，下一頁用這一頁最後一筆的 id 當作 `before`。篩選：`status`、`category_id`、`opener_id`、`claimed_by_id`、`claimed`（`false` 是還沒有人接手）、`q`（開單者的名稱，不分大小寫）。每一筆附上開單者與接手的人的快照。
+  - `GET /tickets/{id}/messages`：舊的在前面。沒有指定時是最新的 `limit` 則；`before` 往前翻頁（用這一頁第一則的 id）；`after` 取得之後的訊息（收到 SSE 的 `message.created`、`message.updated` 時）。回應的 `users` 是這些訊息的作者的快照。
+- 回傳使用者資料時用快照（8.6），頭像依照 8.6 的順序決定。`GET /tickets/{id}` 回傳這張單所有人的快照，以及額外加入的成員。
 
 | 分類 | Endpoint | 權限 |
 |---|---|---|
@@ -516,7 +529,7 @@ ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
 | 面板 | `POST /panel/publish` | 管理員 |
 | 客服單 | `POST /tickets`（從網頁開單）、`GET /tickets`（篩選、分頁）、`GET /tickets/{id}` | 依照權限 |
 | 訊息 | `GET`、`POST /tickets/{id}/messages` | 依照權限 |
-| 附件 | `POST /tickets/{id}/attachments`（取得上傳網址）、`POST /attachments/{attachment_id}/parts`（分塊上傳每一塊的網址）、`POST /attachments/{attachment_id}/complete`、`DELETE /attachments/{attachment_id}`（移除還沒送出的附件）、`GET /attachments/{attachment_id}`（取得新的 presigned URL） | 依照權限；申請網址以外只有上傳的人 |
+| 附件 | `POST /tickets/{id}/attachments`（取得上傳網址）、`POST /attachments/{attachment_id}/parts`（分塊上傳每一塊的網址）、`POST /attachments/{attachment_id}/complete`、`DELETE /attachments/{attachment_id}`（移除還沒送出的附件）、`GET /attachments/{attachment_id}`（附件的資料與新的 presigned URL） | 依照權限；上傳的操作只有上傳的人，還沒送出的附件也只有上傳的人看得到 |
 | 分享連結 | `GET /a/{attachment_id}/{token}`（302 轉址到新的 presigned URL，見 8.4.1） | 不需要登入，用 token 驗證 |
 | 操作 | `POST /tickets/{id}/claim`、`/unclaim`、`/transfer`、`/close`、`/members`，`DELETE /tickets/{id}/members/{user_id}` | 依照權限 |
 | 評分 | `PUT /tickets/{id}/rating`（分數 1–5、評語） | 開單者，只能一次 |

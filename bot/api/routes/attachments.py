@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from taskiq.exceptions import SendTaskError
 
 from bot.api.deps import DBDep, S3Dep, Viewer, ViewerDep
+from bot.api.output import attachment_out
 from bot.api.routes.tickets import ticket_errors, visible_ticket
 from bot.api.schemas import AttachmentIn, AttachmentOut, PartsIn, PartUrlOut, UploadOut
 from bot.db.models import Source, TicketAttachment
@@ -46,6 +47,24 @@ async def create_attachment(
         part_size=upload.part_size,
         part_count=upload.part_count,
     )
+
+
+@router.get("/attachments/{attachment_id}")
+async def get_attachment(
+    attachment_id: int, viewer: ViewerDep, db: DBDep, s3: S3Dep
+) -> AttachmentOut:
+    """附件的資料與新的下載網址（presigned URL 會過期，網頁需要時再呼叫一次）。
+
+    看得到客服單的人都可以讀取；還沒送出的附件只有上傳的人看得到。關單時撤銷的是分享連結，
+    不影響這裡。
+    """
+    attachment = await db.get(TicketAttachment, attachment_id)
+    if attachment is None or (
+        attachment.message_id is None and attachment.uploader_id != viewer.id
+    ):
+        raise HTTPException(404, "找不到這個附件")
+    await visible_ticket(db, viewer, attachment.ticket_id)
+    return await attachment_out(s3, attachment)
 
 
 @router.post("/attachments/{attachment_id}/parts")

@@ -20,6 +20,7 @@ os.environ["S3_ACCESS_KEY_ID"] = "test"
 os.environ["S3_SECRET_ACCESS_KEY"] = "test"
 os.environ["S3_BUCKET"] = "test"
 os.environ["PUBLIC_BASE_URL"] = "https://bot.test"
+os.environ["WEB_TICKET_URL"] = "https://web.test/tickets/{id}"
 
 
 @pytest.fixture(autouse=True)
@@ -30,3 +31,13 @@ def published_events(monkeypatch: pytest.MonkeyPatch) -> Iterator[AsyncMock]:
     publish = AsyncMock()
     monkeypatch.setattr(hooks, "publish_event", publish)
     yield publish
+
+
+@pytest.fixture(autouse=True)
+def close_notifications(monkeypatch: pytest.MonkeyPatch) -> Iterator[AsyncMock]:
+    """關單時放入 queue 的 send_close_notifications（不真的放進 queue）。"""
+    from bot.worker import tasks
+
+    kiq = AsyncMock()
+    monkeypatch.setattr(tasks.send_close_notifications, "kiq", kiq)
+    yield kiq

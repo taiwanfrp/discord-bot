@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     s3_presign_ttl: int = 600
     # bot 對外的網址，用來組出分享連結（docs/tickets.md 8.4.1），例如 https://bot.example.com
     public_base_url: str
+    # 網頁上紀錄頁面的網址，{id} 會換成客服單 id，例如 https://example.com/tickets/{id}
+    web_ticket_url: str
 
     api_host: str = "127.0.0.1"
     api_port: int = 8000
@@ -44,6 +46,13 @@ class Settings(BaseSettings):
     @classmethod
     def _strip_slash(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("web_ticket_url")
+    @classmethod
+    def _require_id(cls, value: str) -> str:
+        if "{id}" not in value:
+            raise ValueError("WEB_TICKET_URL 要包含 {id}")
+        return value
 
     @field_validator("api_cors_origins", mode="before")
     @classmethod

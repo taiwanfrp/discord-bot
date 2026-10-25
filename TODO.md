@@ -108,10 +108,12 @@
 ## 9. 關單、紀錄與評分
 
 - [x] 關單時撤銷這張單所有的分享連結（第 6 步的關單流程已經做了）
-- [ ] `send_close_notifications`：關單後私訊開單者（連結 + 評分）、接手的人（連結）
-- [ ] `GET /tickets`（篩選、分頁）、`GET /tickets/{id}`、`GET /tickets/{id}/messages`
-- [ ] `GET /attachments/{id}`（每次回傳新的 presigned URL，預設 10 分鐘）
-- [ ] 評分：私訊按鈕（`DynamicItem`，`custom_id` 帶客服單 id）→ Modal（分數 1–5、評語），以及 `PUT /tickets/{id}/rating`，只能一次
+- [x] `send_close_notifications`：關單後私訊開單者（連結 + 評分）、接手的人（連結），以及 `requeue_close_notifications`
+- [x] `GET /tickets`（篩選、分頁）、`GET /tickets/{id}`、`GET /tickets/{id}/messages`
+- [x] `GET /attachments/{id}`（每次回傳新的 presigned URL，預設 10 分鐘）
+- [x] 評分：私訊按鈕（`DynamicItem`，`custom_id` 帶客服單 id）→ Modal（分數 1–5、評語），以及 `PUT /tickets/{id}/rating`，只能一次
+- [x] 實際測試：關單後收到私訊、按鈕與 Modal 評分、bot 重啟後舊的按鈕還能用、自己接手時只送一則私訊
+- [ ] 實際測試：分數填錯時的提示、關閉私訊時記錄失敗、接手的人是另一個帳號時收到只有連結的私訊
 
 ## 10. 閒置處理
 

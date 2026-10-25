@@ -1,4 +1,4 @@
-"""附件的分享連結與下載網址（docs/tickets.md 8.4、8.4.1）。"""
+"""附件的分享連結、附件與頭像的下載網址（docs/tickets.md 8.4、8.4.1、8.6）。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import secrets
 from typing import TYPE_CHECKING
 
 from bot.core.config import get_settings
-from bot.db.models import AttachmentStatus, TicketAttachment
+from bot.db.models import AttachmentStatus, TicketAttachment, TicketUser
 from bot.storage.files import content_disposition, is_inline
 
 if TYPE_CHECKING:
@@ -55,5 +55,23 @@ async def presign_download(s3: S3Client, attachment: TicketAttachment) -> str:
                 attachment.filename, inline=is_inline(content_type)
             ),
         },
+        ExpiresIn=get_settings().s3_presign_ttl,
+    )
+
+
+async def download_url(s3: S3Client, attachment: TicketAttachment) -> str | None:
+    """網頁看附件用（需要登入的 API）；還沒處理完、沒有通過檢查的附件沒有網址。"""
+    if attachment.status is not AttachmentStatus.DONE or attachment.storage_key is None:
+        return None
+    return await presign_download(s3, attachment)
+
+
+async def avatar_url(s3: S3Client, row: TicketUser) -> str | None:
+    """S3 上的頭像 → 還沒存到 S3 時用 Discord 的網址 → None（前端顯示預設頭像）。"""
+    if row.avatar_key is None:
+        return row.discord_avatar_url
+    return await s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": get_settings().s3_bucket, "Key": row.avatar_key},
         ExpiresIn=get_settings().s3_presign_ttl,
     )

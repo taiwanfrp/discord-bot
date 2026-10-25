@@ -23,6 +23,7 @@ from bot.db.models import (
     TicketUser,
 )
 from bot.storage.share import TOKEN_LENGTH, new_share_token, share_url
+from bot.tickets.snapshot import display_name
 
 log = logging.getLogger(__name__)
 
@@ -73,8 +74,7 @@ def max_length(content: str, attachments: Sequence[TicketAttachment]) -> int:
 
 
 def webhook_name(row: TicketUser | None) -> str:
-    """跟 Discord 顯示名稱的規則一樣：伺服器暱稱 → 顯示名稱 → 帳號名稱。"""
-    name = (row.nickname or row.global_name or row.username) if row is not None else ""
+    name = display_name(row) if row is not None else ""
     # Discord 不接受含有 discord、clyde 的 webhook 名稱，在中間插入間隔號。實測零寬空白、
     # 外觀相似的字母（例如西里爾字母 о）、全形字母都會被 Discord 當成同一個字
     name = re.sub(r"(?i)discord|clyde", lambda m: f"{m[0][:2]}\u00b7{m[0][2:]}", name).strip()

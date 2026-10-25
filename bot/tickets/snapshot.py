@@ -4,6 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.db.models import TicketUser
 
 
+def display_name(row: TicketUser) -> str:
+    """跟 Discord 顯示名稱的規則一樣：伺服器暱稱 → 顯示名稱 → 帳號名稱。"""
+    return row.nickname or row.global_name or row.username
+
+
 def top_hoisted_role(member: discord.Member) -> discord.Role | None:
     """最高的分隔顯示身份組，紀錄頁面用它的顏色顯示名稱。"""
     hoisted = [role for role in member.roles if role.hoist]

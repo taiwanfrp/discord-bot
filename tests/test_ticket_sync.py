@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
@@ -57,7 +57,9 @@ async def sessionmaker(
     await engine.dispose()
 
 
-async def test_channel_delete_closes_ticket(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
+async def test_channel_delete_closes_ticket(
+    sessionmaker: async_sessionmaker[AsyncSession], close_notifications: AsyncMock
+) -> None:
     async with sessionmaker() as db:
         category = TicketCategory(name="帳務")
         db.add(category)
@@ -88,3 +90,5 @@ async def test_channel_delete_closes_ticket(sessionmaker: async_sessionmaker[Asy
         assert ticket.closed_by_id is None
         events = list(await db.scalars(select(TicketEvent)))
         assert [event.type for event in events] == ["ticket.closed"]
+    # 頻道被直接刪除也算關單，一樣私訊
+    close_notifications.assert_awaited_once_with(1)

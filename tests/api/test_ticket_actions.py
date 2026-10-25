@@ -1,4 +1,5 @@
 from typing import Any
+from unittest.mock import AsyncMock
 
 from sqlalchemy import select, text
 
@@ -148,7 +149,7 @@ async def test_members(env: Env) -> None:
     assert [e[0] for e in await events(env)][1:] == ["ticket.member_added", "ticket.member_removed"]
 
 
-async def test_close(env: Env) -> None:
+async def test_close(env: Env, close_notifications: AsyncMock) -> None:
     ticket_id, channel = await open_ticket(env)
     log_channel = make_text_channel(500)
     env.guild.channels.append(log_channel)
@@ -175,6 +176,8 @@ async def test_close(env: Env) -> None:
     assert response.json()["closed_by_id"] == str(OPENER)
     channel.delete.assert_awaited_once()
     assert log_channel.send.call_args.kwargs["embed"].title == f"客服單 #{ticket_id} 已關閉"
+    # 私訊由 worker 送出
+    close_notifications.assert_awaited_once_with(ticket_id)
 
     async with env.sessionmaker() as db:
         ticket = await db.get_one(Ticket, ticket_id)

@@ -17,6 +17,7 @@ from bot.db.engine import get_engine, get_sessionmaker
 from bot.storage.s3 import s3_client
 from bot.tickets.controls import TicketControlsView
 from bot.tickets.panel import PanelView
+from bot.tickets.rating import RateButton
 from bot.worker.broker import broker
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,8 @@ class Bot(commands.Bot):
         self.add_view(PanelView())
         # claimed=None：註冊所有按鈕（接手與釋放）
         self.add_view(TicketControlsView(claimed=None))
+        # 關單私訊裡的評分按鈕（custom_id 帶客服單 id）
+        self.add_dynamic_items(RateButton)
 
         for module in pkgutil.iter_modules(cogs.__path__, f"{cogs.__name__}."):
             await self.load_extension(module.name)

@@ -1,4 +1,4 @@
-"""客服單的操作（docs/tickets.md 4.2、第 10 節）。
+"""客服單的操作（docs/tickets.md 4.2、第 10 節、10.1）。
 
 Discord 的按鈕、slash command 與 API 都呼叫這裡，權限也在這裡檢查。可能同時發生的操作
 （例如兩個人同時接手）用帶條件的 UPDATE，確保只有一個成功。
@@ -8,9 +8,10 @@ import logging
 from typing import cast
 
 import discord
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from taskiq.exceptions import SendTaskError
 
 from bot.core.permissions import Access, get_access
 from bot.db.models import (
@@ -33,6 +34,8 @@ log = logging.getLogger(__name__)
 
 Actor = discord.User | discord.Member
 
+MIN_RATING, MAX_RATING = 1, 5
+
 
 async def get_ticket(db: AsyncSession, ticket_id: int) -> Ticket:
     ticket = await db.get(Ticket, ticket_id)
@@ -53,6 +56,19 @@ async def can_view(db: AsyncSession, ticket: Ticket, user_id: int, access: Acces
     if ticket.opener_id == user_id or access.is_staff(ticket.category_id):
         return True
     return await db.get(TicketMember, (ticket.id, user_id)) is not None
+
+
+def visible_filter(user_id: int, access: Access) -> ColumnElement[bool]:
+    """跟 can_view 相同的規則，用在客服單列表的查詢。"""
+    if access.is_admin:
+        return true()
+    conditions = [
+        Ticket.opener_id == user_id,
+        Ticket.id.in_(select(TicketMember.ticket_id).where(TicketMember.user_id == user_id)),
+    ]
+    if access.category_ids:
+        conditions.append(Ticket.category_id.in_(access.category_ids))
+    return or_(*conditions)
 
 
 async def actor_access(db: AsyncSession, actor: Actor) -> Access:
@@ -319,6 +335,7 @@ async def close(
     add_event(db, ticket, "ticket.closed", actor.id if actor else None)
     await db.commit()
     await db.refresh(ticket)
+    await queue_close_notifications(ticket.id)
 
     category = await db.get(TicketCategory, ticket.category_id)
     await send_log(db, guild, closed_log(ticket, category.name if category else "（已刪除）"))
@@ -330,5 +347,50 @@ async def close(
             pass
         except discord.HTTPException:
             log.exception("Failed to delete the channel of ticket %d", ticket.id)
-    # TODO 第 9 步：放入 send_close_notifications（私訊開單者與接手的人）
     return True
+
+
+async def queue_close_notifications(ticket_id: int) -> None:
+    # 避免循環 import：worker 的工作也會關單（自動關閉）
+    from bot.worker.tasks import send_close_notifications
+
+    try:
+        await send_close_notifications.kiq(ticket_id)
+    except SendTaskError:
+        # requeue_close_notifications 之後會補放
+        log.exception("Failed to queue send_close_notifications for ticket %d", ticket_id)
+
+
+def check_can_rate(ticket: Ticket, user_id: int) -> None:
+    if user_id != ticket.opener_id:
+        raise TicketError("只有開單者可以評分", 403)
+    if ticket.status is not TicketStatus.CLOSED:
+        raise TicketError("客服單關閉後才能評分")
+    if ticket.rating is not None:
+        raise TicketError("已經評分過了")
+
+
+async def rate(
+    db: AsyncSession, ticket: Ticket, user_id: int, rating: int, feedback: str | None
+) -> None:
+    """評分，每張客服單只能一次（Discord 的私訊與網頁共用）。"""
+    check_can_rate(ticket, user_id)
+    if not MIN_RATING <= rating <= MAX_RATING:
+        raise TicketError(f"分數只能是 {MIN_RATING}～{MAX_RATING}", 422)
+    rated = await execute_update(
+        db,
+        update(Ticket)
+        .where(
+            Ticket.id == ticket.id,
+            Ticket.status == TicketStatus.CLOSED,
+            Ticket.rating.is_(None),
+        )
+        .values(rating=rating, feedback=(feedback or "").strip() or None, rated_at=utcnow()),
+    )
+    if not rated:
+        await db.rollback()
+        raise TicketError("已經評分過了")
+    # 客服單已經關閉，不再更新快照
+    add_event(db, ticket, "ticket.rated", user_id)
+    await db.commit()
+    await db.refresh(ticket)

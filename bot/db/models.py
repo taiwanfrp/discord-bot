@@ -93,6 +93,7 @@ class Ticket(Base):
         Index("ix_ticket_opener_id_status", "opener_id", "status"),
         Index("ix_ticket_status_last_message_at", "status", "last_message_at"),
         Index("ix_ticket_status_opener_added_at", "status", "opener_added_at"),
+        Index("ix_ticket_status_closed_at", "status", "closed_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -123,6 +124,8 @@ class Ticket(Base):
     # null 表示系統自動關閉
     closed_by_id: Mapped[Snowflake | None]
     close_reason: Mapped[str | None] = mapped_column(EncryptedText)
+    # 關單後的私訊都處理完（送出或確定送不出去）的時間
+    close_notified_at: Mapped[datetime | None]
 
     rating: Mapped[int | None]
     feedback: Mapped[str | None] = mapped_column(EncryptedText)

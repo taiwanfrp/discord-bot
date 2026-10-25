@@ -205,6 +205,66 @@ class TicketOut(BaseModel):
     closed_by_id: Snowflake | None
 
 
+class UserOut(BaseModel):
+    """客服單裡某個人的快照（docs/tickets.md 8.6），顯示名稱：nickname → global_name → username。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: Snowflake = Field(validation_alias="user_id")
+    username: str
+    global_name: str | None
+    nickname: str | None
+    # S3 的 presigned URL 或 Discord 的網址；null 表示使用預設頭像
+    avatar_url: str | None = None
+    # 最高的分隔顯示身份組
+    role_name: str | None
+    role_color: int | None
+    is_bot: bool
+
+
+class TicketSummaryOut(TicketOut):
+    """客服單列表的一筆。"""
+
+    opener: UserOut | None = None
+    claimed_by: UserOut | None = None
+
+
+class MemberOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: Snowflake
+    added_by_id: Snowflake
+    added_at: datetime
+
+
+class TicketDetailOut(TicketOut):
+    content: str
+    claimed_at: datetime | None
+    last_message_at: datetime
+    close_reason: str | None
+    # 只有開單者與這個分類的客服看得到評分
+    rating: int | None
+    feedback: str | None
+    rated_at: datetime | None
+    # 客服單裡每個人的快照；其他欄位的 Discord ID 都對應到這裡
+    users: list[UserOut] = []
+    # 額外加入的成員
+    members: list[MemberOut] = []
+
+
+class RatingIn(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    feedback: str | None = Field(None, max_length=1000)
+
+
+class RatingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    rating: int
+    feedback: str | None
+    rated_at: datetime
+
+
 class EventOut(BaseModel):
     """SSE 事件的 data（ticket_event）。"""
 
@@ -248,6 +308,8 @@ class AttachmentOut(BaseModel):
     # pending（處理中）、done、rejected（類型不符）、failed
     status: AttachmentStatus
     created_at: datetime
+    # 下載用的 presigned URL（有效期限是 S3_PRESIGN_TTL），只有讀取紀錄的 API、done 的附件才有
+    download_url: str | None = None
 
 
 class UploadOut(BaseModel):
@@ -287,6 +349,15 @@ class MessageOut(BaseModel):
     author_id: Snowflake
     content: str
     created_at: datetime
+    edited_at: datetime | None
+    deleted_at: datetime | None
     # 網頁訊息才有：pending（還沒送到 Discord）、sent、failed
     delivery_status: DeliveryStatus | None
     attachments: list[AttachmentOut] = []
+
+
+class MessagePage(BaseModel):
+    # 舊的在前面
+    messages: list[MessageOut]
+    # 這些訊息的作者的快照
+    users: list[UserOut]

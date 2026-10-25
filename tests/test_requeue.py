@@ -15,6 +15,7 @@ from bot.db.models import (
     TicketAttachment,
     TicketCategory,
     TicketMessage,
+    TicketStatus,
 )
 from bot.db.types import utcnow
 from bot.worker import tasks
@@ -103,3 +104,35 @@ async def test_requeue_messages(db: AsyncSession, monkeypatch: pytest.MonkeyPatc
     await tasks.requeue_pending_messages()
     # 以客服單為單位，同一張單只放一次
     deliver.assert_awaited_once_with(1)
+
+
+async def test_requeue_close_notifications(
+    db: AsyncSession, close_notifications: AsyncMock
+) -> None:
+    now = utcnow()
+    for status, closed, notified in (
+        (TicketStatus.CLOSED, OLD, False),
+        # 剛關閉，工作可能還在 queue 裡
+        (TicketStatus.CLOSED, timedelta(minutes=2), False),
+        # 太久以前
+        (TicketStatus.CLOSED, timedelta(days=2), False),
+        (TicketStatus.CLOSED, OLD, True),
+        (TicketStatus.OPEN, None, False),
+    ):
+        db.add(
+            Ticket(
+                category_id=1,
+                source=Source.WEB,
+                opener_id=5,
+                subject="",
+                content="",
+                status=status,
+                closed_at=now - closed if closed is not None else None,
+                close_notified_at=now if notified else None,
+            )
+        )
+    await db.commit()
+
+    await tasks.requeue_close_notifications()
+    # 前兩張是 fixture 建立的開啟中客服單
+    close_notifications.assert_awaited_once_with(3)
