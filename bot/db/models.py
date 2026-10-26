@@ -177,11 +177,26 @@ class TicketMessage(Base):
     author_id: Mapped[Snowflake]
     content: Mapped[str] = mapped_column(EncryptedText)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # 在 Discord 上編輯的時間，編輯前的內容存在 ticket_message_revision
     edited_at: Mapped[datetime | None]
+    # 在 Discord 上被刪除的時間；內容不清空，網頁上只有客服、管理員看得到
     deleted_at: Mapped[datetime | None]
     # 網頁訊息才有
     delivery_status: Mapped[DeliveryStatus | None]
     attempts: Mapped[int] = mapped_column(default=0)
+
+
+class TicketMessageRevision(Base):
+    """訊息編輯前的內容，一筆是一個舊版本；網頁上只有客服、管理員看得到。"""
+
+    __tablename__ = "ticket_message_revision"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("ticket_message.id"), index=True)
+    content: Mapped[str] = mapped_column(EncryptedText)
+    # 這一版從什麼時候開始（送出或編輯成這一版的時間），到什麼時候被編輯掉
+    created_at: Mapped[datetime]
+    replaced_at: Mapped[datetime]
 
 
 class TicketAttachment(Base):
@@ -210,6 +225,8 @@ class TicketAttachment(Base):
     # 分享連結 token 的 SHA-256（hex），只有網頁上傳的附件才有
     share_token_hash: Mapped[str | None] = mapped_column(String(64))
     share_revoked_at: Mapped[datetime | None]
+    # 編輯 Discord 訊息時被移除的時間；檔案保留，網頁上只有客服、管理員看得到
+    removed_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 

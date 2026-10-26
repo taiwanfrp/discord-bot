@@ -309,6 +309,8 @@ class AttachmentOut(BaseModel):
     size: int
     # pending（處理中）、done、rejected（類型不符）、failed
     status: AttachmentStatus
+    # 編輯 Discord 訊息時被移除的時間；被移除的附件只有這張單的客服、管理員拿得到
+    removed_at: datetime | None
     created_at: datetime
     # 下載用的 presigned URL（有效期限是 S3_PRESIGN_TTL），只有讀取紀錄的 API、done 的附件才有
     download_url: str | None = None
@@ -342,6 +344,15 @@ class MessageIn(BaseModel):
     attachment_ids: list[int] = Field(default_factory=list, max_length=10)
 
 
+class RevisionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    content: str
+    # 這一版從送出（或編輯成這一版）到被編輯掉的時間
+    created_at: datetime
+    replaced_at: datetime
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -351,11 +362,15 @@ class MessageOut(BaseModel):
     author_id: Snowflake
     content: str
     created_at: datetime
+    # 在 Discord 上編輯的時間；content 是最新的內容
     edited_at: datetime | None
+    # 被刪除的訊息只有這張單的客服、管理員拿得到內容，其他人的 content 是空的、沒有附件
     deleted_at: datetime | None
     # 網頁訊息才有：pending（還沒送到 Discord）、sent、failed
     delivery_status: DeliveryStatus | None
     attachments: list[AttachmentOut] = []
+    # 編輯前的每一版（舊的在前面），只有這張單的客服、管理員拿得到
+    revisions: list[RevisionOut] = []
 
 
 class MessagePage(BaseModel):

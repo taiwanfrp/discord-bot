@@ -1,3 +1,5 @@
+from collections.abc import Collection
+
 import discord
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -11,8 +13,11 @@ from bot.db.models import (
     TicketAttachment,
     TicketEvent,
     TicketMessage,
+    TicketMessageRevision,
+    TicketStatus,
 )
 from bot.db.queries import execute_update, get_guild_settings
+from bot.db.types import utcnow
 from bot.storage.files import allowed_file_types, is_allowed_extension
 from bot.tickets.actions import require_open
 from bot.tickets.delivery import MAX_LENGTH, max_length
@@ -81,6 +86,105 @@ async def save_discord_message(
     )
     await db.commit()
     return [a.id for a in attachments if a.status is AttachmentStatus.PENDING]
+
+
+async def edit_discord_message(db: AsyncSession, message: discord.Message) -> None:
+    """Discord 上的訊息被編輯：編輯前的內容存進 ticket_message_revision（docs/tickets.md 8.1）。
+
+    只處理從 Discord 傳的訊息（網頁訊息只有 bot 自己的 webhook 能編輯）。內容和附件都沒變的
+    更新（例如 Discord 產生連結預覽）不算編輯。客服單關閉後不再更新。
+    """
+    saved = await db.scalar(
+        select(TicketMessage)
+        .join(Ticket, Ticket.id == TicketMessage.ticket_id)
+        .where(
+            TicketMessage.discord_message_id == message.id,
+            TicketMessage.source == Source.DISCORD,
+            Ticket.status == TicketStatus.OPEN,
+        )
+    )
+    if saved is None:
+        return
+    # 編輯時可以移除附件；檔案保留，只標記移除的時間
+    removed = list(
+        await db.scalars(
+            select(TicketAttachment).where(
+                TicketAttachment.message_id == saved.id,
+                TicketAttachment.removed_at.is_(None),
+                TicketAttachment.discord_attachment_id.not_in(
+                    [attachment.id for attachment in message.attachments]
+                ),
+            )
+        )
+    )
+    if message.content == saved.content and not removed:
+        return
+
+    edited_at = message.edited_at or utcnow()
+    if message.content != saved.content:
+        db.add(
+            TicketMessageRevision(
+                message_id=saved.id,
+                content=saved.content,
+                created_at=saved.edited_at or saved.created_at,
+                replaced_at=edited_at,
+            )
+        )
+        saved.content = message.content
+    saved.edited_at = edited_at
+    for attachment in removed:
+        attachment.removed_at = edited_at
+    await update_snapshot(db, saved.ticket_id, message.author)
+    db.add(
+        TicketEvent(
+            ticket_id=saved.ticket_id,
+            type="message.updated",
+            actor_id=message.author.id,
+            data={"message_id": str(saved.id)},
+        )
+    )
+    await db.commit()
+
+
+async def delete_discord_messages(db: AsyncSession, discord_message_ids: Collection[int]) -> None:
+    """Discord 上的訊息被刪除：只記錄刪除的時間，內容保留（docs/tickets.md 8.1）。
+
+    網頁送出的訊息在 Discord 上被刪除（例如客服刪掉）也一樣，並撤銷它的附件的分享連結。
+    Discord 不會告訴 bot 是誰刪的，所以事件沒有 actor。客服單關閉後不再更新。
+    """
+    messages = list(
+        await db.scalars(
+            select(TicketMessage)
+            .join(Ticket, Ticket.id == TicketMessage.ticket_id)
+            .where(
+                TicketMessage.discord_message_id.in_(discord_message_ids),
+                TicketMessage.deleted_at.is_(None),
+                Ticket.status == TicketStatus.OPEN,
+            )
+            .order_by(TicketMessage.id)
+        )
+    )
+    if not messages:
+        return
+    now = utcnow()
+    for message in messages:
+        message.deleted_at = now
+        db.add(
+            TicketEvent(
+                ticket_id=message.ticket_id,
+                type="message.deleted",
+                data={"message_id": str(message.id)},
+            )
+        )
+    await db.execute(
+        update(TicketAttachment)
+        .where(
+            TicketAttachment.message_id.in_([message.id for message in messages]),
+            TicketAttachment.share_revoked_at.is_(None),
+        )
+        .values(share_revoked_at=now)
+    )
+    await db.commit()
 
 
 async def create_web_message(

@@ -213,7 +213,16 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
    - 最後一次重試也失敗時記錄為 `failed`。
    - 放入工作失敗的附件（例如當時 Redis 連不上），由 scheduler 每 10 分鐘執行的 `requeue_pending_attachments` 重新放入。
 4. 送出 SSE 事件 `message.created`。附件處理完（`done`、`rejected`、`failed`）時送出 `attachment.updated`，網頁更新附件的顯示。
-5. 編輯、刪除：用 `on_message_edit`、`on_message_delete` 更新資料庫，並送出對應的事件（第二階段再做）。
+5. 編輯、刪除：用 `on_raw_message_edit`、`on_raw_message_delete`、`on_raw_bulk_message_delete` 更新資料庫。一般的 `on_message_edit`、`on_message_delete` 只收得到快取裡的訊息，bot 重啟之前的訊息就收不到。
+   - 編輯：舊的內容存進 `ticket_message_revision`（加密，一筆是一個舊版本，記錄這一版從什麼時候到什麼時候），`ticket_message` 改成新的內容並設定 `edited_at`，送出 `message.updated`。訊息的 id 不變，網頁的排序、翻頁都不受影響。
+     - 內容和附件都沒變的更新不算編輯，例如 Discord 產生連結預覽時。
+     - 編輯時移除的附件：檔案保留，設定 `removed_at`。
+     - 只處理從 Discord 傳的訊息。網頁送出的訊息只有 bot 自己的 webhook 能編輯，而且 Discord 上的內容多了附件連結，本來就跟資料庫裡的不一樣。
+   - 刪除：只設定 `deleted_at`，內容不清空，送出 `message.deleted`。網頁送出的訊息在 Discord 上被刪除（例如客服刪掉）也一樣，並撤銷它的附件的分享連結。Discord 不會告訴 bot 是誰刪的，所以事件沒有 `actor_id`。
+   - **網頁上只有這張單的客服、管理員看得到原本的內容**：編輯前的每一版、被刪除的訊息、編輯時移除的附件。開單者和額外加入的成員只看到「已編輯」「已刪除」的標記，跟在 Discord 上看到的一樣，例如使用者貼錯密碼後刪掉，其他成員就看不到。
+   - 新增、編輯、刪除依照收到的順序處理（bot 裡的 `asyncio.Lock`）。discord.py 每個事件各自一個 task，訊息傳出後馬上被其他 bot 刪除時，刪除可能比新增先處理完，就找不到要刪除的訊息。bot 同一時間只有一個（11.3），所以不需要 Redis 鎖。
+   - bot 停止期間（例如部署時）的編輯、刪除收不到，Discord 不會補送。關單後頻道已經刪除，也不再更新。
+   - 網頁上的訊息還不能編輯、刪除。
 
 ### 8.2 網頁 → Discord
 
@@ -299,7 +308,7 @@ GET /a/<attachment_id>/<token>
 
 - `GET /tickets/{id}/events`：單一客服單的事件。
 - `GET /events`：客服單列表的變動（新開單、被接手、已關閉）。
-- 事件類型：`message.created`、`message.updated`（網頁訊息送到 Discord 的結果 `delivery_status`，8.2；之後也用在訊息編輯）、`message.deleted`、`attachment.updated`（附件處理完，8.1、8.2）、`ticket.created`、`ticket.claimed`、`ticket.unclaimed`、`ticket.transferred`、`ticket.member_added`、`ticket.member_removed`、`ticket.opener_added`（開單者加入伺服器後被加進頻道）、`ticket.inactivity_reminded`、`ticket.closed`、`ticket.rated`、`notification.sent`、`notification.failed`（關單私訊的結果，第 10 節）。`GET /events` 只送 `ticket.*` 的事件。
+- 事件類型：`message.created`、`message.updated`（網頁訊息送到 Discord 的結果 `delivery_status`，8.2；Discord 上的編輯，8.1）、`message.deleted`（Discord 上的刪除，8.1）、`attachment.updated`（附件處理完，8.1、8.2）、`ticket.created`、`ticket.claimed`、`ticket.unclaimed`、`ticket.transferred`、`ticket.member_added`、`ticket.member_removed`、`ticket.opener_added`（開單者加入伺服器後被加進頻道）、`ticket.inactivity_reminded`、`ticket.closed`、`ticket.rated`、`notification.sent`、`notification.failed`（關單私訊的結果，第 10 節）。`GET /events` 只送 `ticket.*` 的事件。
 - **所有 SSE 事件都先寫入 `ticket_event`，再推送**（包括 `message.created` 這類訊息事件，`data` 只放 id）。事件的 `id` 就是 `ticket_event.id`。重新連線時，瀏覽器會自動送出 `Last-Event-ID`，伺服器從 `ticket_event` 補送之後的事件（只補送這個使用者有權限看的客服單）。
   - 最多補送 1000 個事件。斷線太久的話，前端重新連線後應該重新載入資料。
   - 事件的順序不一定跟 id 相同：id 在新增時就決定，兩個交易同時寫入時，比較小的 id 可能比較晚 commit。所以伺服器不會因為 id 比較小就略過事件，前端也可能重複收到同一個事件（重新連線時），要用事件的 id 去重。
@@ -516,8 +525,12 @@ ticket_member（額外加入的成員）
 ticket_message
   id, ticket_id, source（discord | web）, discord_message_id
   author_id
-  🔒content, created_at, edited_at, deleted_at
+  🔒content（最新的內容）, created_at, edited_at, deleted_at（被刪除時內容不清空，8.1）
   delivery_status（網頁訊息才有：pending | sent | failed）, attempts
+
+ticket_message_revision（編輯前的內容，一筆是一個舊版本，8.1）
+  id, message_id, 🔒content
+  created_at（這一版開始的時間：送出或編輯成這一版）, replaced_at（被編輯掉的時間）
 
 ticket_attachment
   id, ticket_id, message_id（網頁上傳時，送出訊息前是 null）, uploader_id
@@ -527,6 +540,7 @@ ticket_attachment
   status（pending | done | rejected | failed）, attempts
   upload_id（網頁的 multipart upload）, uploaded_at（網頁上傳完成的時間，null 表示還在上傳）
   share_token_hash（分享連結 token 的 SHA-256，只有網頁上傳的附件才有）, share_revoked_at
+  removed_at（編輯訊息時被移除的時間，檔案保留）
   created_at
 
 ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
@@ -541,6 +555,8 @@ ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
 - `ticket(status, opener_added_at)`：找出開單者還沒加進頻道的客服單。
 - `ticket(status, closed_at)`：找出私訊還沒處理完的客服單。
 - `ticket_message(ticket_id, id)`、`ticket_event(ticket_id, id)`：依照順序分頁讀取、SSE 補送。
+- `ticket_message(discord_message_id)`（唯一）：同一則訊息不會存兩次；編輯、刪除時用它找訊息。
+- `ticket_message_revision(message_id)`：列出訊息時一起讀取編輯前的內容。
 
 ### 13.1 各資料庫的差異
 
@@ -560,7 +576,8 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
   - BREACH 攻擊要回應裡同時有祕密和攻擊者能控制的內容。這裡的 cookie 在 header 裡，不會被壓縮；回應裡的 presigned URL，也是看得到這張單的人本來就拿得到的，所以沒有實際的風險。
 - 列表類的 endpoint（客服單、訊息）使用 cursor 分頁（`?before=<id>&limit=50`，`limit` 最多 100），不用 offset：訊息一直在增加，用 offset 會漏掉或重複。
   - `GET /tickets`：新的在前面，下一頁用這一頁最後一筆的 id 當作 `before`。篩選：`status`、`category_id`、`opener_id`、`claimed_by_id`、`claimed`（`false` 是還沒有人接手）、`q`（開單者的名稱，不分大小寫）。每一筆附上開單者與接手的人的快照。
-  - `GET /tickets/{id}/messages`：舊的在前面。沒有指定時是最新的 `limit` 則；`before` 往前翻頁（用這一頁第一則的 id）；`after` 取得之後的訊息（收到 SSE 的 `message.created`、`message.updated` 時）。回應的 `users` 是這些訊息的作者的快照。
+  - `GET /tickets/{id}/messages`：舊的在前面。沒有指定時是最新的 `limit` 則；`before` 往前翻頁（用這一頁第一則的 id）；`after` 取得之後的訊息（收到 SSE 的 `message.created` 時；收到 `message.updated`、`message.deleted` 時用 `?after=<message_id - 1>&limit=1` 重新取得那一則）。回應的 `users` 是這些訊息的作者的快照。
+    - 編輯過的訊息有 `edited_at`、被刪除的有 `deleted_at`。編輯前的每一版（`revisions`）、被刪除的訊息的內容與附件、編輯時移除的附件（`removed_at`），只有這張單的客服、管理員拿得到；其他人拿到的被刪除的訊息 `content` 是空的、沒有附件（8.1）。
 - 回傳使用者資料時用快照（8.6），頭像依照 8.6 的順序決定。`GET /tickets/{id}` 回傳這張單所有人的快照，以及額外加入的成員。
 
 | 分類 | Endpoint | 權限 |
@@ -576,7 +593,7 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
 | 面板 | `POST /panel/publish` | 管理員 |
 | 客服單 | `POST /tickets`（從網頁開單）、`GET /tickets`（篩選、分頁）、`GET /tickets/{id}` | 依照權限 |
 | 訊息 | `GET`、`POST /tickets/{id}/messages` | 依照權限 |
-| 附件 | `POST /tickets/{id}/attachments`（取得上傳網址）、`POST /attachments/{attachment_id}/parts`（分塊上傳每一塊的網址）、`POST /attachments/{attachment_id}/complete`、`DELETE /attachments/{attachment_id}`（移除還沒送出的附件）、`GET /attachments/{attachment_id}`（附件的資料與新的 presigned URL） | 依照權限；上傳的操作只有上傳的人，還沒送出的附件也只有上傳的人看得到 |
+| 附件 | `POST /tickets/{id}/attachments`（取得上傳網址）、`POST /attachments/{attachment_id}/parts`（分塊上傳每一塊的網址）、`POST /attachments/{attachment_id}/complete`、`DELETE /attachments/{attachment_id}`（移除還沒送出的附件）、`GET /attachments/{attachment_id}`（附件的資料與新的 presigned URL） | 依照權限；上傳的操作只有上傳的人，還沒送出的附件也只有上傳的人看得到；編輯時移除的附件、被刪除的訊息的附件只有客服、管理員看得到 |
 | 分享連結 | `GET /a/{attachment_id}/{token}`（302 轉址到新的 presigned URL，見 8.4.1） | 不需要登入，用 token 驗證 |
 | 操作 | `POST /tickets/{id}/claim`、`/unclaim`、`/transfer`、`/close`、`/members`，`DELETE /tickets/{id}/members/{user_id}` | 依照權限 |
 | 評分 | `PUT /tickets/{id}/rating`（分數 1–5、評語） | 開單者，只能一次 |
@@ -591,6 +608,7 @@ FastAPI 會自動產生 OpenAPI 文件（`/docs`），給前端開發時參考�
 | 客服單的形式 | 私人頻道 | 權限彈性，使用者也熟悉 |
 | 關單後 | 刪除頻道 | 紀錄都在資料庫，由網頁顯示 |
 | 訊息保存 | 每則訊息送出時就存進資料庫，內容加密 | 網頁要即時同步；紀錄頁面直接使用 |
+| 訊息的編輯、刪除 | 同步 Discord 上的編輯、刪除；保留編輯前的每一版與被刪除的內容，網頁上只有客服、管理員看得到 | 處理爭議時有紀錄；開單者看到的跟 Discord 上一樣，貼錯的東西刪掉後其他成員就看不到 |
 | 名稱與頭像 | 每張客服單保存每個人的快照，關單後不再更新；頭像存到 S3 | 使用者改名、換頭像或刪除帳號後，紀錄頁面仍然顯示當時的樣子 |
 | 紀錄頁面 | 由前端用結構化的資料產生 | 之後改版型、搜尋、控制權限、評分都比較容易；需要時再加「匯出成 HTML 檔」 |
 | ORM / migration | SQLAlchemy 2.0 async + Alembic | 一套程式碼支援三種資料庫 |

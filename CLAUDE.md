@@ -46,7 +46,7 @@ bot/
 ├── api/             # HTTP API（FastAPI，跟 bot 在同一個程序）：routes、dependencies、CSRF
 ├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session、commit 後推送 ticket_event 的 hook
 ├── storage/         # S3（aiobotocore）、附件的檔案規則（副檔名、magic bytes、key）、附件與頭像存到 S3、網頁上傳（presigned URL、檢查）、分享連結
-├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式、網頁訊息與附件、用 webhook 送到 Discord、關單私訊與評分、閒置提醒與自動關閉
+├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式、Discord 訊息的保存與編輯、刪除、網頁訊息與附件、用 webhook 送到 Discord、關單私訊與評分、閒置提醒與自動關閉
 ├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 migrations/          # Alembic migration
@@ -98,6 +98,7 @@ Dockerfile           # bot、worker、scheduler 共用的 image；放進去的�
 - route 放在 `bot/api/routes/`，用 `bot/api/deps.py` 的 dependency 取得資料：`ViewerDep`（需要登入）、`AdminDep`（只有管理員）、`GuildDep`、`DBDep`、`RedisDep`、`S3Dep`（bot 啟動時建立的 S3 client）。不要在 route 裡直接呼叫 `get_redis()`、`s3_client()` 等函式，測試才能替換。
 - 客服單的流程寫在 `bot/tickets/`，Discord 與 API 共用；要讓使用者看到的錯誤丟出 `bot.tickets.open.TicketError(訊息, status_code)`，API 轉成 HTTP 錯誤，Discord 回覆訊息。
 - 權限用 `viewer.access`（`bot.core.permissions.Access`）：`is_admin`、`is_staff(category_id)`。開單者的判斷是 `viewer.id == ticket.opener_id`。
+- 被刪除的訊息（`deleted_at`）、編輯前的內容（`ticket_message_revision`）、編輯時移除的附件（`removed_at`），網頁上只有這張單的客服、管理員看得到（`is_staff(ticket.category_id)`）。新增讀取訊息或附件的地方（例如匯出）時要一樣處理。
 - request / response 的格式寫在 `bot/api/schemas.py`；Discord ID 的欄位用那裡的 `Snowflake` 型別（輸出時轉成字串）。
 
 ## 背景工作規則

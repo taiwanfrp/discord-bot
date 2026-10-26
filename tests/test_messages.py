@@ -19,9 +19,15 @@ from bot.db.models import (
     TicketCategory,
     TicketEvent,
     TicketMessage,
+    TicketMessageRevision,
+    TicketStatus,
     TicketUser,
 )
-from bot.tickets.messages import save_discord_message
+from bot.tickets.messages import (
+    delete_discord_messages,
+    edit_discord_message,
+    save_discord_message,
+)
 from tests.api.helpers import make_member
 from tests.database import create_test_engine
 
@@ -32,6 +38,9 @@ async def db(tmp_path: Path) -> AsyncIterator[AsyncSession]:
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         yield session
     await engine.dispose()
+
+
+CREATED_AT = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
 
 
 async def make_ticket(db: AsyncSession) -> Ticket:
@@ -45,14 +54,20 @@ async def make_ticket(db: AsyncSession) -> Ticket:
     return ticket
 
 
-def make_message(message_id: int, attachments: list[Any]) -> discord.Message:
+def make_message(
+    message_id: int,
+    attachments: list[Any],
+    content: str = "你好",
+    edited_at: datetime | None = None,
+) -> discord.Message:
     return cast(
         discord.Message,
         SimpleNamespace(
             id=message_id,
             author=make_member(5, []),
-            content="你好",
-            created_at=datetime(2026, 10, 24, 12, 0, tzinfo=UTC),
+            content=content,
+            created_at=CREATED_AT,
+            edited_at=edited_at,
             attachments=attachments,
         ),
     )
@@ -108,3 +123,152 @@ async def test_duplicate_message_is_ignored(db: AsyncSession) -> None:
     await save_discord_message(db, ticket, make_message(100, []))
     assert await save_discord_message(db, ticket, make_message(100, [])) == []
     assert await db.scalar(select(func.count()).select_from(TicketMessage)) == 1
+
+
+async def event_types(db: AsyncSession) -> list[tuple[str, int | None]]:
+    events = await db.scalars(select(TicketEvent).order_by(TicketEvent.id))
+    return [(event.type, event.actor_id) for event in events]
+
+
+async def test_edit_message(db: AsyncSession) -> None:
+    ticket = await make_ticket(db)
+    first, second = make_attachment(1, "a.png"), make_attachment(2, "b.png")
+    await save_discord_message(db, ticket, make_message(100, [first, second]))
+    edited_at = [datetime(2026, 10, 24, 12, minute, tzinfo=UTC) for minute in (5, 10)]
+
+    # 改內容，並移除第二個附件
+    await edit_discord_message(db, make_message(100, [first], "第二版", edited_at[0]))
+    # 只改內容
+    await edit_discord_message(db, make_message(100, [first], "第三版", edited_at[1]))
+
+    saved = await db.scalar(select(TicketMessage).execution_options(populate_existing=True))
+    assert saved is not None
+    assert (saved.content, saved.edited_at) == ("第三版", edited_at[1])
+    revisions = list(
+        await db.scalars(select(TicketMessageRevision).order_by(TicketMessageRevision.id))
+    )
+    # 每一版的時間範圍接在一起
+    assert [(r.content, r.created_at, r.replaced_at) for r in revisions] == [
+        ("你好", CREATED_AT, edited_at[0]),
+        ("第二版", edited_at[0], edited_at[1]),
+    ]
+    raw = (await db.execute(text("SELECT content FROM ticket_message_revision"))).scalars()
+    assert "你好" not in list(raw)
+    # 移除的附件保留，只標記時間
+    removed = {
+        a.filename: a.removed_at
+        for a in await db.scalars(
+            select(TicketAttachment).execution_options(populate_existing=True)
+        )
+    }
+    assert removed == {"a.png": None, "b.png": edited_at[0]}
+    assert await event_types(db) == [
+        ("message.created", 5),
+        ("message.updated", 5),
+        ("message.updated", 5),
+    ]
+
+
+async def test_edit_without_changes_is_ignored(db: AsyncSession) -> None:
+    """例如 Discord 產生連結預覽時的更新：內容、附件都沒變。"""
+    ticket = await make_ticket(db)
+    attachment = make_attachment(1, "a.png")
+    await save_discord_message(db, ticket, make_message(100, [attachment]))
+    await edit_discord_message(db, make_message(100, [attachment]))
+
+    saved = await db.scalar(select(TicketMessage))
+    assert saved is not None and saved.edited_at is None
+    assert await db.scalar(select(func.count()).select_from(TicketMessageRevision)) == 0
+    assert await event_types(db) == [("message.created", 5)]
+
+
+async def test_edit_ignored(db: AsyncSession) -> None:
+    ticket = await make_ticket(db)
+    # 網頁訊息在 Discord 上的內容多了附件連結，跟資料庫的不一樣，但它不是被編輯
+    db.add(
+        TicketMessage(
+            ticket_id=ticket.id,
+            source=Source.WEB,
+            discord_message_id=200,
+            author_id=5,
+            content="網頁",
+        )
+    )
+    await db.commit()
+    await edit_discord_message(db, make_message(200, [], "網頁\n📎 [a.png](https://bot.test/a)"))
+    # 不是客服單裡的訊息
+    await edit_discord_message(db, make_message(300, [], "其他頻道"))
+    # 關單後不再更新
+    await save_discord_message(db, ticket, make_message(100, []))
+    ticket.status = TicketStatus.CLOSED
+    await db.commit()
+    await edit_discord_message(db, make_message(100, [], "關單後"))
+
+    contents = await db.scalars(select(TicketMessage.content).order_by(TicketMessage.id))
+    assert list(contents) == ["網頁", "你好"]
+    assert await db.scalar(select(func.count()).select_from(TicketMessageRevision)) == 0
+
+
+async def test_delete_messages(db: AsyncSession) -> None:
+    ticket = await make_ticket(db)
+    await save_discord_message(db, ticket, make_message(100, [make_attachment(1, "a.png")]))
+    # 網頁送出的訊息，在 Discord 上被客服刪掉
+    web = TicketMessage(
+        ticket_id=ticket.id, source=Source.WEB, discord_message_id=200, author_id=5, content="網頁"
+    )
+    db.add(web)
+    await db.flush()
+    db.add(
+        TicketAttachment(
+            ticket_id=ticket.id,
+            message_id=web.id,
+            uploader_id=5,
+            source=Source.WEB,
+            filename="b.png",
+            size=10,
+            share_token_hash="0" * 64,
+        )
+    )
+    await save_discord_message(db, ticket, make_message(300, []))
+
+    await delete_discord_messages(db, [100, 200, 999])
+    # 重複收到不會再記錄一次
+    await delete_discord_messages(db, [100])
+
+    rows = list(
+        await db.scalars(
+            select(TicketMessage)
+            .order_by(TicketMessage.id)
+            .execution_options(populate_existing=True)
+        )
+    )
+    # 內容保留
+    assert [(m.content, m.deleted_at is not None) for m in rows] == [
+        ("你好", True),
+        ("網頁", True),
+        ("你好", False),
+    ]
+    revoked = {
+        a.filename: a.share_revoked_at is not None
+        for a in await db.scalars(
+            select(TicketAttachment).execution_options(populate_existing=True)
+        )
+    }
+    assert revoked == {"a.png": True, "b.png": True}
+    # Discord 不會告訴 bot 是誰刪的
+    assert await event_types(db) == [
+        ("message.created", 5),
+        ("message.created", 5),
+        ("message.deleted", None),
+        ("message.deleted", None),
+    ]
+
+
+async def test_delete_after_close_is_ignored(db: AsyncSession) -> None:
+    ticket = await make_ticket(db)
+    await save_discord_message(db, ticket, make_message(100, []))
+    ticket.status = TicketStatus.CLOSED
+    await db.commit()
+    await delete_discord_messages(db, [100])
+    saved = await db.scalar(select(TicketMessage))
+    assert saved is not None and saved.deleted_at is None

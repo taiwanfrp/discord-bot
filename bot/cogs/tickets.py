@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -15,7 +16,11 @@ from bot.db.engine import get_sessionmaker
 from bot.db.models import Ticket, TicketStatus
 from bot.tickets import actions
 from bot.tickets.errors import TicketError
-from bot.tickets.messages import save_discord_message
+from bot.tickets.messages import (
+    delete_discord_messages,
+    edit_discord_message,
+    save_discord_message,
+)
 from bot.tickets.open import add_opener, pending_openers_query
 from bot.worker.tasks import mirror_attachment
 
@@ -39,6 +44,12 @@ def require_member(interaction: discord.Interaction) -> tuple[discord.Guild, dis
 
 class Tickets(Cog):
     ticket = app_commands.Group(name="ticket", description="客服單", guild_only=True)
+
+    def __init__(self, bot: commands.Bot) -> None:
+        super().__init__(bot)
+        # 訊息的新增、編輯、刪除依照收到的順序處理，例如傳出後馬上被其他 bot 刪除時，
+        # 刪除要等新增存好。discord.py 每個事件各自一個 task，所以要在第一個 await 就取得鎖
+        self.message_lock = asyncio.Lock()
 
     @ticket.command(name="add", description="把成員加進這張客服單")
     @app_commands.describe(member="要加入的成員")
@@ -101,7 +112,7 @@ class Tickets(Cog):
         # 釘選、加入討論串等系統訊息
         if message.type not in (discord.MessageType.default, discord.MessageType.reply):
             return
-        async with get_sessionmaker()() as db:
+        async with self.message_lock, get_sessionmaker()() as db:
             ticket = await db.scalar(
                 select(Ticket).where(
                     Ticket.channel_id == message.channel.id, Ticket.status == TicketStatus.OPEN
@@ -119,6 +130,29 @@ class Tickets(Cog):
             except SendTaskError:
                 # requeue_pending_attachments 之後會補放
                 log.exception("Failed to queue mirror_attachment %d", attachment_id)
+
+    # 用 raw 事件：一般的 on_message_edit、on_message_delete 只收得到快取裡的訊息，
+    # bot 重啟之前的訊息就收不到
+    @commands.Cog.listener()
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
+        if payload.guild_id != get_settings().guild_id:
+            return
+        async with self.message_lock, get_sessionmaker()() as db:
+            await edit_discord_message(db, payload.message)
+
+    @commands.Cog.listener()
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
+        if payload.guild_id != get_settings().guild_id:
+            return
+        async with self.message_lock, get_sessionmaker()() as db:
+            await delete_discord_messages(db, [payload.message_id])
+
+    @commands.Cog.listener()
+    async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent) -> None:
+        if payload.guild_id != get_settings().guild_id:
+            return
+        async with self.message_lock, get_sessionmaker()() as db:
+            await delete_discord_messages(db, payload.message_ids)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:

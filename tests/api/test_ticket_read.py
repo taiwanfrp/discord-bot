@@ -1,8 +1,16 @@
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import update
 
-from bot.db.models import AttachmentStatus, TicketAttachment, TicketUser
+from bot.db.models import (
+    AttachmentStatus,
+    Source,
+    TicketAttachment,
+    TicketMessage,
+    TicketMessageRevision,
+    TicketUser,
+)
 from tests.api.helpers import Env
 from tests.api.test_ticket_actions import ADMIN, OPENER, OTHER, STAFF, login_as, open_ticket
 from tests.api.test_web_messages import upload
@@ -158,6 +166,92 @@ async def test_messages(env: Env) -> None:
 
     await login_as(env, OTHER)
     assert (await env.client.get(url)).status_code == 404
+
+
+async def test_edited_and_deleted_messages(env: Env) -> None:
+    """被刪除的訊息、編輯前的內容、編輯時移除的附件，只有這張單的客服、管理員看得到。"""
+    ticket_id, _ = await open_ticket(env)
+    created_at = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
+    edited_at = datetime(2026, 10, 24, 12, 5, tzinfo=UTC)
+    async with env.sessionmaker() as db:
+        edited = TicketMessage(
+            ticket_id=ticket_id,
+            source=Source.DISCORD,
+            discord_message_id=100,
+            author_id=OPENER,
+            content="新的",
+            created_at=created_at,
+            edited_at=edited_at,
+        )
+        deleted = TicketMessage(
+            ticket_id=ticket_id,
+            source=Source.DISCORD,
+            discord_message_id=101,
+            author_id=OPENER,
+            content="貼錯了",
+            created_at=created_at,
+            deleted_at=edited_at,
+        )
+        db.add_all([edited, deleted])
+        await db.flush()
+        db.add(
+            TicketMessageRevision(
+                message_id=edited.id, content="舊的", created_at=created_at, replaced_at=edited_at
+            )
+        )
+        attachments = {
+            filename: TicketAttachment(
+                ticket_id=ticket_id,
+                message_id=message.id,
+                uploader_id=OPENER,
+                source=Source.DISCORD,
+                filename=filename,
+                size=10,
+                removed_at=removed_at,
+            )
+            for filename, message, removed_at in [
+                ("kept.png", edited, None),
+                ("removed.png", edited, edited_at),
+                ("deleted.png", deleted, None),
+            ]
+        }
+        db.add_all(attachments.values())
+        await db.commit()
+
+    def summary(page: Any) -> list[tuple[str, list[str], list[str]]]:
+        return [
+            (
+                m["content"],
+                [a["filename"] for a in m["attachments"]],
+                [r["content"] for r in m["revisions"]],
+            )
+            for m in page["messages"]
+        ]
+
+    def status(filename: str) -> Any:
+        return env.client.get(f"/attachments/{attachments[filename].id}")
+
+    page = await messages(env, ticket_id)
+    # 開單者只看到已編輯、已刪除的標記
+    assert summary(page) == [("新的", ["kept.png"], []), ("", [], [])]
+    assert page["messages"][0]["edited_at"] is not None
+    assert page["messages"][1]["deleted_at"] is not None
+    assert (await status("kept.png")).status_code == 200
+    assert (await status("removed.png")).status_code == 404
+    assert (await status("deleted.png")).status_code == 404
+
+    for user_id in (STAFF, ADMIN):
+        await login_as(env, user_id)
+        page = await messages(env, ticket_id)
+        assert summary(page) == [
+            ("新的", ["kept.png", "removed.png"], ["舊的"]),
+            ("貼錯了", ["deleted.png"], []),
+        ]
+        [revision] = page["messages"][0]["revisions"]
+        assert revision["created_at"] < revision["replaced_at"]
+        assert page["messages"][0]["attachments"][1]["removed_at"] is not None
+        for filename in attachments:
+            assert (await status(filename)).status_code == 200
 
 
 async def test_get_attachment(env: Env) -> None:
