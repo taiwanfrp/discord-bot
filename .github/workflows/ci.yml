@@ -1,4 +1,3 @@
-# 檢查與測試：push 到 main、PR 時執行，內容跟本機的 pre-commit、pytest 一樣；main 通過後由 build.yml 推送 image
 name: CI
 
 on:
@@ -10,22 +9,20 @@ on:
 permissions:
   contents: read
 
-# 同一個分支有新的 push 時，取消還在跑的
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   lint:
-    name: pre-commit（ruff、mypy 等）
+    name: pre-commit
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      # setup-uv 沒有 v10 這種大版本的 tag，只有完整的版本號；第三方的 action 固定到 commit
+      # setup-uv 沒有大版本的 tag，固定到 commit；uv 的版本跟 Dockerfile 一樣
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
-          # 跟 Dockerfile 一樣
           version: "0.11.18"
           cache-python: true
       - run: uv sync --locked
@@ -33,15 +30,13 @@ jobs:
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-      # 跟 commit 時的 hook 一樣。ruff 會自動修正的問題在這裡算失敗，並顯示要改哪裡
       - run: uv run pre-commit run --all-files --show-diff-on-failure
 
   test:
-    name: pytest（${{ matrix.db }}）
+    name: pytest (${{ matrix.db }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
-      # 一個資料庫失敗時，其他的照樣跑完，才知道是不是只有那個資料庫有問題
       fail-fast: false
       matrix:
         db: [sqlite, mysql, mariadb, postgres]
@@ -52,19 +47,15 @@ jobs:
           version: "0.11.18"
           cache-python: true
       - run: uv sync --locked
-      # compose.yaml 的 db profile（跟本機一樣，MySQL / MariaDB 的預設字元集故意是 latin1）
       - name: Start ${{ matrix.db }}
         if: matrix.db != 'sqlite'
         run: docker compose --profile db up -d --wait ${{ matrix.db }}
       - run: uv run pytest --db ${{ matrix.db }}
 
-  # 確認 image 建得起來、跑得起來；推送到 GHCR 在 build.yml（CI 通過後才執行）
   docker:
     name: Docker image
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - run: docker build -t taiwanfrp-discord-bot .
-      - name: Smoke test
-        run: .github/smoke-test.sh taiwanfrp-discord-bot
+    needs: [lint, test]
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      packages: write

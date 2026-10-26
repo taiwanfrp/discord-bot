@@ -1,7 +1,6 @@
 #!/bin/sh
-# image 的 smoke test（ci.yml、build.yml 共用）：.github/smoke-test.sh <image>
-# image 裡有需要的檔案與套件（.dockerignore 是白名單）：
-# migration 跑得起來，三個服務的模組都 import 得到。設定是假的，不會連到任何服務
+# 用法：.github/smoke-test.sh <image>
+# migration 跑得起來、三個服務的模組 import 得到（.dockerignore 是白名單）。設定是假的
 set -eu
 
 env_file=$(mktemp)

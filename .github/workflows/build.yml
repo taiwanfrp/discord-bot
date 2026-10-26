@@ -1,50 +1,31 @@
-# 建立 image 並推送到 GHCR：main 的 CI 全部通過後才執行（docs/tickets.md 11.3）
+# 由 ci.yml 在檢查、測試通過後呼叫：建立 image、smoke test，main 推送到 GHCR
 name: Build
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
-
-permissions: {}
-
-# 依照順序執行，舊的 commit 不會在新的之後才推送、蓋掉 latest
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
+  workflow_call:
 
 jobs:
   image:
-    name: 建立並推送 image
-    # PR 的 CI 也會觸發 workflow_run（fork 的分支也可能叫 main），要排除：
-    # 否則會用有寫入權限的 token 建立 PR 的程式碼
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request'
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
-    env:
-      # 這裡的 GITHUB_SHA 是 main 最新的 commit，不一定是這次 CI 測試的那個
-      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.HEAD_SHA }}
-      # GHCR 的名稱要小寫。source 讓 GHCR 的 package 連到這個 repo；revision 用來確認部署的是哪個 commit
-      - run: |
+      # GHCR 只接受小寫
+      - name: Build
+        run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           echo "IMAGE=$image" >> "$GITHUB_ENV"
-          docker build -t "$image:sha-${HEAD_SHA::7}" -t "$image:latest" \
+          docker build -t "$image:sha-${GITHUB_SHA::7}" -t "$image:latest" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.revision=$HEAD_SHA" .
-      # 重新建立的 image 也跑一次，推送的一定是測試過的
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
       - name: Smoke test
         run: .github/smoke-test.sh "$IMAGE:latest"
       - name: Push
+        if: github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker push --all-tags "$IMAGE"
+          docker push "$IMAGE:sha-${GITHUB_SHA::7}"
+          docker push "$IMAGE:latest"
