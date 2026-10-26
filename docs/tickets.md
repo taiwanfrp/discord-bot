@@ -549,7 +549,7 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
 
 - **交易隔離等級**：MySQL / MariaDB 的連線改用 `READ COMMITTED`，跟 PostgreSQL 的預設一樣。程式裡很多地方用「帶條件的 UPDATE，看更新了幾筆」來處理同時操作（評分、閒置提醒、附件），要依照最新 commit 的資料判斷。預設的 `REPEATABLE READ` 下，MariaDB 11.8 起（`innodb_snapshot_isolation`）更新一筆讀過之後被其他交易改過的資料，會直接失敗（錯誤 1020），而不是更新 0 筆。
 - **時間**：MySQL / MariaDB 的 `DATETIME` 預設只到秒，所以指定到微秒（`fsp=6`）。
-- **字元集**：連線指定 `charset=utf8mb4`，資料表則使用資料庫的預設字元集。MySQL 8.0、MariaDB 11.6 起預設就是 `utf8mb4`；舊版的預設可能是 `latin1`，所以建立資料庫時要指定 `CHARACTER SET utf8mb4`，否則存不進中文和 emoji。
+- **字元集**：連線指定 `charset=utf8mb4`；每個資料表也自己指定 `utf8mb4`（`bot/db/base.py`，migration 的 `mysql_charset`），不依賴資料庫的預設字元集。舊版 MySQL / MariaDB 的預設是 `latin1`，存不進中文和 emoji。排序規則用伺服器對 `utf8mb4` 的預設。測試用的 MySQL / MariaDB 故意把預設字元集設成 `latin1`，確認這一點。
 - **migration 的 downgrade**：MySQL / MariaDB 不能刪除外鍵用到的索引，所以刪除資料表時直接刪，不要先刪它的索引。Alembic 自動產生的 downgrade 會先刪索引，要手動改掉。
 
 ## 14. API

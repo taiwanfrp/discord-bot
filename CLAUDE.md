@@ -78,7 +78,7 @@ Dockerfile           # bot、worker、scheduler 共用的 image；放進去的�
 - Enum 使用 `native_enum=False`（存成字串）。model 裡的 enum 繼承 `StrEnum`，會自動存成它的值。
 - 時間一律以 UTC 儲存。model 裡寫 `Mapped[datetime]` 會自動使用 `UTCDateTime`（只接受帶時區的 datetime），現在時間用 `bot.db.types.utcnow()`；不使用資料庫的 `now()` 預設值，因為各資料庫的時區行為不同。
 - 自增主鍵與外鍵用 `Integer`（SQLite 只有 `INTEGER PRIMARY KEY` 會自動遞增）。
-- MySQL / MariaDB 使用 `utf8mb4`。連線的隔離等級是 `READ COMMITTED`（`bot/db/engine.py`，原因見 docs/tickets.md 13.1）。
+- MySQL / MariaDB 使用 `utf8mb4`：連線網址加 `?charset=utf8mb4`；資料表在 `bot/db/base.py` 自己指定，不依賴資料庫的預設。新增資料表的 migration 要有 `mysql_charset="utf8mb4"`（自動產生的會帶上，`--db mysql` 的測試會檢查）。連線的隔離等級是 `READ COMMITTED`（`bot/db/engine.py`，原因見 docs/tickets.md 13.1）。
 - 修改 models、migration，或是用到交易、鎖、帶條件的 UPDATE 的程式時，用 `--db mysql`、`--db mariadb`、`--db postgres` 都跑過測試。
 - migration 的 downgrade 刪除資料表時直接 `drop_table`，不要先刪它的索引（MySQL / MariaDB 不能刪除外鍵用到的索引；Alembic 自動產生的會先刪，要改掉）。
 - 測試的資料庫一律用 `tests/database.py` 的 `create_test_engine(tmp_path)`，不要寫死 SQLite，才能用 `--db` 換成其他資料庫。

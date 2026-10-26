@@ -28,6 +28,8 @@ services:
   mysql:
     image: mysql:8.4
     profiles: [db]
+    # 故意把預設字元集設成 latin1（舊版的預設），確認程式不依賴資料庫的預設字元集
+    command: ["--character-set-server=latin1", "--collation-server=latin1_swedish_ci"]
     environment:
       MYSQL_DATABASE: ticket_bot_test
       MYSQL_USER: ticket_bot
@@ -46,6 +48,8 @@ services:
   mariadb:
     image: mariadb:11.8
     profiles: [db]
+    # 故意把預設字元集設成 latin1（舊版的預設），確認程式不依賴資料庫的預設字元集
+    command: ["--character-set-server=latin1", "--collation-server=latin1_swedish_ci"]
     environment:
       MARIADB_DATABASE: ticket_bot_test
       MARIADB_USER: ticket_bot

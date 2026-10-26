@@ -35,6 +35,16 @@ async def add_ticket(session: AsyncSession) -> Ticket:
     return ticket
 
 
+async def test_unicode(session: AsyncSession) -> None:
+    # emoji 是 4 bytes：MySQL / MariaDB 的資料表要是 utf8mb4（bot/db/base.py）
+    session.add(TicketCategory(name="帳務 💳", emoji="🎫"))
+    await session.commit()
+
+    session.expunge_all()
+    loaded = (await session.execute(select(TicketCategory))).scalar_one()
+    assert (loaded.name, loaded.emoji) == ("帳務 💳", "🎫")
+
+
 async def test_encrypted_columns(session: AsyncSession) -> None:
     ticket = await add_ticket(session)
 
