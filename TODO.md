@@ -138,7 +138,8 @@
 - [x] GitHub Actions CI：pre-commit 的檢查、四種資料庫的 pytest、建立 image 並跑 smoke test（migration、import 三個服務的模組）
 - [x] 在 GitHub 上確認 CI 第一次執行通過
 - [x] `build.yml`（檢查、測試通過後由 `ci.yml` 呼叫）：建立 image、smoke test，main 推送 `sha-` tag 與 `latest` 到 GHCR
-- [ ] 在 GitHub 上確認推送成功，並確認 package 的公開設定（部署平台拉 image 要不要登入）
+- [x] 在 GitHub 上確認 CI 通過後推送成功（`sha-` tag 與 `latest`）
+- [ ] 決定 GHCR 的 package 要不要公開（目前是私人的，部署平台拉 image 要用有 `read:packages` 的 token 登入）
 - [ ] 在部署平台上設定並部署，順便做第 8 步用公開的 S3 與 bot 網址的測試
 
 ## 12. 之後再做
