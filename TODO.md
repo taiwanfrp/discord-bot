@@ -136,7 +136,7 @@
 - [x] bot、scheduler 用 Redis 鎖保證同一時間只有一個（`ticket-bot:lock:bot`、`ticket-bot:lock:scheduler`）：取不到就等、定時延長、被拿走時用非 0 結束；scheduler 收到 `SIGTERM` 時正常關閉並釋放鎖
 - [x] 實際測試（本機 Docker）：第二個 bot、scheduler 會等待，超過鎖的有效期限也不會拿到；第一個停止後 1 秒內接手；等待中的被停止時馬上結束；鎖被拿走時用 exit 1 結束
 - [x] GitHub Actions CI：pre-commit 的檢查、四種資料庫的 pytest、建立 image 並跑 smoke test（migration、import 三個服務的模組）
-- [ ] 在 GitHub 上確認 CI 第一次執行通過
+- [x] 在 GitHub 上確認 CI 第一次執行通過
 - [ ] 在部署平台上設定並部署，順便做第 8 步用公開的 S3 與 bot 網址的測試
 
 ## 12. 之後再做
