@@ -112,7 +112,7 @@
 - [x] `GET /tickets`（篩選、分頁）、`GET /tickets/{id}`、`GET /tickets/{id}/messages`
 - [x] `GET /attachments/{id}`（每次回傳新的 presigned URL，預設 10 分鐘）
 - [x] 評分：私訊按鈕（`DynamicItem`，`custom_id` 帶客服單 id）→ Modal（分數 1–5、評語），以及 `PUT /tickets/{id}/rating`，只能一次
-- [x] 實際測試：關單後收到私訊、按鈕與 Modal 評分、bot 重啟後舊的按鈕還能用、自己接手時只送一則私訊
+- [x] 實際測試：關單後收到私訊、按鈕與 Modal 評分（私訊顯示分數與評語）、先在網頁評分再按私訊的按鈕、bot 重啟後舊的按鈕還能用、自己接手時只送一則私訊
 - [ ] 實際測試：分數填錯時的提示、關閉私訊時記錄失敗、接手的人是另一個帳號時收到只有連結的私訊
 
 ## 10. 閒置處理

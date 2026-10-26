@@ -40,6 +40,26 @@ def parse_rating(value: str) -> int:
     return rating
 
 
+def stars(rating: int) -> str:
+    return "★" * rating + "☆" * (actions.MAX_RATING - rating) + f"（{rating} 分）"
+
+
+async def show_rating(
+    interaction: discord.Interaction, ticket_id: int, rating: int, feedback: str | None
+) -> None:
+    """把私訊的 embed 加上評分與評語，並拿掉評分按鈕（這則私訊只有開單者自己看得到）。"""
+    assert interaction.message is not None
+    embeds = [embed.copy() for embed in interaction.message.embeds]
+    if embeds:
+        embeds[0].description = None
+        embeds[0].add_field(name="評分", value=stars(rating), inline=False)
+        if feedback:
+            embeds[0].add_field(name="評語", value=feedback[:1024], inline=False)
+    await interaction.response.edit_message(
+        embeds=embeds, view=closed_view(ticket_id, rating=False)
+    )
+
+
 class RateButton(
     discord.ui.DynamicItem[discord.ui.Button[discord.ui.View]],
     template=r"ticket:rate:(?P<id>[0-9]+)",
@@ -70,7 +90,16 @@ class RateButton(
         try:
             async with get_sessionmaker()() as db:
                 ticket = await actions.get_ticket(db, self.ticket_id)
-                actions.check_can_rate(ticket, interaction.user.id)
+            if (
+                ticket.rating is not None
+                and interaction.user.id == ticket.opener_id
+                and interaction.message is not None
+            ):
+                # 已經在網頁評分過了：私訊改成顯示評分
+                await show_rating(interaction, ticket.id, ticket.rating, ticket.feedback)
+                await interaction.followup.send("已經評分過了", ephemeral=True)
+                return
+            actions.check_can_rate(ticket, interaction.user.id)
             await interaction.response.send_modal(RatingModal(self.ticket_id))
         except Exception as error:
             await handle_error(interaction, error)
@@ -94,8 +123,8 @@ class RatingModal(discord.ui.Modal, title="為這次的客服評分"):
             ticket = await actions.get_ticket(db, self.ticket_id)
             await actions.rate(db, ticket, interaction.user.id, rating, self.feedback.value)
         if interaction.message is not None:
-            # 拿掉私訊裡的評分按鈕，只留下紀錄的連結
-            await interaction.response.edit_message(view=closed_view(self.ticket_id, rating=False))
+            assert ticket.rating is not None
+            await show_rating(interaction, ticket.id, ticket.rating, ticket.feedback)
             await interaction.followup.send("感謝你的評分！", ephemeral=True)
         else:
             await interaction.response.send_message("感謝你的評分！", ephemeral=True)
