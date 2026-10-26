@@ -9,7 +9,6 @@ from bot.core.config import get_settings
 from bot.db.engine import get_sessionmaker
 from bot.tickets import actions
 from bot.tickets.controls import handle_error
-from bot.tickets.errors import TicketError
 
 
 def ticket_url(ticket_id: int) -> str:
@@ -26,18 +25,8 @@ def closed_view(ticket_id: int, *, rating: bool) -> discord.ui.View:
     return view
 
 
-def parse_rating(value: str) -> int:
-    """Modal 的分數是文字，只接受 1～5（全形數字也可以）。"""
-    try:
-        rating = int(value.strip())
-    except ValueError:
-        rating = 0
-    if not actions.MIN_RATING <= rating <= actions.MAX_RATING:
-        raise TicketError(
-            f"分數只能是 {actions.MIN_RATING}～{actions.MAX_RATING}，請再按一次「評分」重新填寫",
-            422,
-        )
-    return rating
+# 下拉選單的選項，高分在上面
+RATING_TEXT = {5: "非常滿意", 4: "滿意", 3: "普通", 2: "不滿意", 1: "非常不滿意"}
 
 
 def stars(rating: int) -> str:
@@ -106,19 +95,25 @@ class RateButton(
 
 
 class RatingModal(discord.ui.Modal, title="為這次的客服評分"):
-    score: discord.ui.TextInput["RatingModal"] = discord.ui.TextInput(
-        label="分數（1～5）", placeholder="5", min_length=1, max_length=1
-    )
-    feedback: discord.ui.TextInput["RatingModal"] = discord.ui.TextInput(
-        label="評語（選填）", style=discord.TextStyle.paragraph, required=False, max_length=1000
-    )
-
     def __init__(self, ticket_id: int) -> None:
         super().__init__()
         self.ticket_id = ticket_id
+        # 分數用下拉選單，只能選 1～5，不需要另外驗證
+        self.score = discord.ui.Select["RatingModal"](
+            placeholder="選擇分數",
+            options=[
+                discord.SelectOption(label=stars(rating), value=str(rating), description=text)
+                for rating, text in RATING_TEXT.items()
+            ],
+        )
+        self.feedback = discord.ui.TextInput["RatingModal"](
+            style=discord.TextStyle.paragraph, required=False, max_length=1000
+        )
+        self.add_item(discord.ui.Label(text="分數", component=self.score))
+        self.add_item(discord.ui.Label(text="評語（選填）", component=self.feedback))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        rating = parse_rating(self.score.value)
+        rating = int(self.score.values[0])
         async with get_sessionmaker()() as db:
             ticket = await actions.get_ticket(db, self.ticket_id)
             await actions.rate(db, ticket, interaction.user.id, rating, self.feedback.value)

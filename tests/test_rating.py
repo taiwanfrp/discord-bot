@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from bot.db.models import Source, Ticket, TicketCategory, TicketStatus
 from bot.db.types import utcnow
 from bot.tickets import rating
-from bot.tickets.errors import TicketError
 from tests.database import create_test_engine
 
 OPENER = 5
@@ -60,14 +59,38 @@ def interaction(user_id: int, *, message: object | None = None) -> Any:
     )
 
 
-def test_parse_rating() -> None:
-    assert rating.parse_rating(" 5 ") == 5
-    # 中文輸入法常打出全形數字
-    assert rating.parse_rating("３") == 3
-    for value in ("0", "6", "a", ""):
-        with pytest.raises(TicketError) as error:
-            rating.parse_rating(value)
-        assert error.value.status_code == 422
+def test_modal() -> None:
+    """送給 Discord 的 Modal：分數是必填的下拉選單（高分在上面），評語是選填的長文字。"""
+    score, feedback = rating.RatingModal(1).to_dict()["components"]
+    assert (score["type"], score["label"], score["component"]["type"]) == (18, "分數", 3)
+    assert score["component"]["required"] is True
+    assert [
+        (option["value"], option["label"], option["description"])
+        for option in score["component"]["options"]
+    ] == [
+        ("5", "★★★★★（5 分）", "非常滿意"),
+        ("4", "★★★★☆（4 分）", "滿意"),
+        ("3", "★★★☆☆（3 分）", "普通"),
+        ("2", "★★☆☆☆（2 分）", "不滿意"),
+        ("1", "★☆☆☆☆（1 分）", "非常不滿意"),
+    ]
+    assert (feedback["label"], feedback["component"]["type"]) == ("評語（選填）", 4)
+    assert feedback["component"]["required"] is False
+
+
+def fill(modal: rating.RatingModal, clicked: Any, score: str, feedback: str) -> None:
+    """跟 Discord 送出 Modal 時的資料一樣（依照 custom_id 對應到元件）。"""
+    components: Any = [
+        {
+            "type": 18,
+            "component": {"type": 3, "custom_id": modal.score.custom_id, "values": [score]},
+        },
+        {
+            "type": 18,
+            "component": {"type": 4, "custom_id": modal.feedback.custom_id, "value": feedback},
+        },
+    ]
+    modal._refresh(clicked, components, {})
 
 
 async def test_button_custom_id() -> None:
@@ -110,10 +133,9 @@ def edited(clicked: Any) -> tuple[list[tuple[str, str]], list[str | None]]:
 
 async def test_submit(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
     modal = rating.RatingModal(1)
-    modal.score._value = "4"
-    modal.feedback._value = " 很快就解決了 "
     message = dm()
     submitted = interaction(OPENER, message=message)
+    fill(modal, submitted, "4", " 很快就解決了 ")
     await modal.on_submit(submitted)
 
     # 私訊加上評分與評語，評分按鈕拿掉，只留下紀錄的連結
@@ -135,12 +157,3 @@ async def test_submit(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
     clicked.response.send_modal.assert_not_awaited()
     assert edited(clicked)[0][1:] == [("評分", "★★★★☆（4 分）"), ("評語", "很快就解決了")]
     assert clicked.followup.send.call_args.args[0] == "已經評分過了"
-
-
-async def test_submit_invalid_score(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
-    modal = rating.RatingModal(1)
-    modal.score._value = "9"
-    with pytest.raises(TicketError):
-        await modal.on_submit(interaction(OPENER))
-    async with sessionmaker() as db:
-        assert (await db.get_one(Ticket, 1)).rating is None
