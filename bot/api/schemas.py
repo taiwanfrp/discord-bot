@@ -241,6 +241,8 @@ class TicketDetailOut(TicketOut):
     content: str
     claimed_at: datetime | None
     last_message_at: datetime
+    # 送出閒置提醒的時間，有新訊息時清除（docs/tickets.md 第 9 節）
+    inactivity_reminded_at: datetime | None
     close_reason: str | None
     # 只有開單者與這個分類的客服看得到評分
     rating: int | None

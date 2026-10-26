@@ -5,6 +5,7 @@ Discord 的按鈕、slash command 與 API 都呼叫這裡，權限也在這裡�
 """
 
 import logging
+from collections.abc import Sequence
 from typing import cast
 
 import discord
@@ -24,6 +25,7 @@ from bot.db.models import (
 )
 from bot.db.queries import execute_update
 from bot.db.types import utcnow
+from bot.tickets.channels import get_text_channel
 from bot.tickets.controls import refresh_opening_message
 from bot.tickets.errors import TicketError
 from bot.tickets.log import closed_log, send_log
@@ -299,10 +301,13 @@ async def close(
     reason: str | None,
     *,
     delete_channel: bool = True,
+    conditions: Sequence[ColumnElement[bool]] = (),
 ) -> bool:
     """關單（docs/tickets.md 第 10 節）。actor 是 None 表示系統（自動關閉、頻道被刪除）。
 
-    回傳 False 表示已經關閉了（只有 actor 是 None 時；有 actor 時會丟出 TicketError）。
+    conditions 是關單當下還要成立的條件（例如自動關閉時，這段期間沒有新訊息）。
+    回傳 False 表示已經關閉了，或是不符合 conditions（只有 actor 是 None 時；
+    有 actor 時會丟出 TicketError）。
     """
     if actor is not None:
         await require_manager(db, ticket, actor)
@@ -310,7 +315,7 @@ async def close(
     closed = await execute_update(
         db,
         update(Ticket)
-        .where(Ticket.id == ticket.id, Ticket.status == TicketStatus.OPEN)
+        .where(Ticket.id == ticket.id, Ticket.status == TicketStatus.OPEN, *conditions)
         .values(
             status=TicketStatus.CLOSED,
             closed_at=now,
@@ -339,10 +344,11 @@ async def close(
 
     category = await db.get(TicketCategory, ticket.category_id)
     await send_log(db, guild, closed_log(ticket, category.name if category else "（已刪除）"))
-    channel = ticket_channel(guild, ticket)
-    if delete_channel and channel is not None:
+    if delete_channel and ticket.channel_id is not None:
         try:
-            await channel.delete(reason=f"客服單 #{ticket.id} 已關閉")
+            channel = await get_text_channel(guild, ticket.channel_id)
+            if channel is not None:
+                await channel.delete(reason=f"客服單 #{ticket.id} 已關閉")
         except discord.NotFound:
             pass
         except discord.HTTPException:

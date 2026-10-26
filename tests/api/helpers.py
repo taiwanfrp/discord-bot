@@ -142,6 +142,10 @@ class FakeGuild:
     def get_channel(self, channel_id: int) -> MagicMock | None:
         return next((c for c in self.channels if c.id == channel_id), None)
 
+    async def fetch_channel(self, channel_id: int) -> MagicMock:
+        # 快取裡沒有的頻道就是不存在
+        raise discord.NotFound(MagicMock(status=404), "Unknown Channel")
+
     def get_role(self, role_id: int) -> MagicMock | None:
         return next((r for r in self.roles if r.id == role_id), None)
 

@@ -26,7 +26,7 @@ from bot.db.types import utcnow
 from bot.storage import mirror, uploads
 from bot.storage.s3 import s3_client
 from bot.storage.status import finish
-from bot.tickets import delivery, notifications
+from bot.tickets import delivery, inactivity, notifications
 from bot.tickets.open import add_opener, pending_openers_query
 from bot.tickets.permissions import staff_role_ids, sync_role_overwrites
 from bot.worker.broker import ContextDep, DiscordDep, broker, is_last_attempt
@@ -146,6 +146,23 @@ async def send_close_notifications(
         await notifications.send_close_notifications(
             db, get_redis(), discord_client, ticket_id, last_attempt=is_last_attempt(context)
         )
+
+
+@broker.task(schedule=[{"cron": "*/5 * * * *"}])
+async def check_inactive_tickets(discord_client: discord.Client = DiscordDep) -> None:
+    """閒置提醒與自動關閉（docs/tickets.md 第 9 節）。"""
+    lock = get_redis().lock(
+        "ticket-bot:lock:check_inactive_tickets", timeout=10 * 60, blocking=False
+    )
+    if not await lock.acquire():
+        # 上一次還在執行；5 分鐘後會再執行，不需要重試
+        return
+    try:
+        async with get_sessionmaker()() as db:
+            await inactivity.check_inactive_tickets(db, discord_client)
+    finally:
+        with contextlib.suppress(LockError):
+            await lock.release()
 
 
 @broker.task(schedule=[{"cron": "*/10 * * * *"}])

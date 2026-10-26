@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Ticket
 from bot.db.queries import get_guild_settings
+from bot.tickets.channels import get_text_channel
 
 log = logging.getLogger(__name__)
 
@@ -14,11 +15,10 @@ async def send_log(db: AsyncSession, guild: discord.Guild, embed: discord.Embed)
     settings = await get_guild_settings(db)
     if settings.log_channel_id is None:
         return
-    channel = guild.get_channel(settings.log_channel_id)
-    if not isinstance(channel, discord.TextChannel):
-        return
     try:
-        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        channel = await get_text_channel(guild, settings.log_channel_id)
+        if channel is not None:
+            await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         log.exception("Failed to send log message")
 

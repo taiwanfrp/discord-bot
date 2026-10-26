@@ -41,7 +41,7 @@ bot/
 ├── api/             # HTTP API（FastAPI，跟 bot 在同一個程序）：routes、dependencies、CSRF
 ├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session、commit 後推送 ticket_event 的 hook
 ├── storage/         # S3（aiobotocore）、附件的檔案規則（副檔名、magic bytes、key）、附件與頭像存到 S3、網頁上傳（presigned URL、檢查）、分享連結
-├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式、網頁訊息與附件、用 webhook 送到 Discord、關單私訊與評分
+├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式、網頁訊息與附件、用 webhook 送到 Discord、關單私訊與評分、閒置提醒與自動關閉
 ├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 migrations/          # Alembic migration
@@ -97,6 +97,7 @@ TODO.md
 - Redis 的 key 一律加上 `ticket-bot:` 前綴（與主要 API 約定的 `session:`、`ticket_code:` 除外）；不要用 db 編號區分資料，pub/sub 不分 db。
 - queue 與鎖使用單一主節點的 Redis（`REDIS_URL`），不可以放在多主架構的 session store 上。
 - 工作寫在 `bot/worker/tasks.py`，用 `@broker.task` 定義；需要 Discord 時加上參數 `discord_client: discord.Client = DiscordDep`（`bot.worker.broker`，只有 REST API，沒有快取）。要用預設值的寫法，`.kiq()` 才不需要傳這個參數；不要命名為 `discord`，會蓋掉 `discord` 模組。
+- worker 的 Discord client 沒有快取（`guild.get_channel` 一定是 None）：要用頻道時用 `bot.tickets.channels.get_text_channel`，快取裡沒有時才用 REST 取得。
 - 失敗的工作會自動重試，間隔 1、2、4、8、16 分鐘，由 scheduler 放回 queue。不需要重試的錯誤要自己處理掉，不要丟出例外。
 - 最後一次重試也失敗時要做的處理（例如標記為 `failed`）：加上參數 `context: Context = ContextDep`，用 `is_last_attempt(context)` 判斷（`bot.worker.broker`）。
 - 工作執行超過 30 分鐘還沒結束，會被其他 worker 接手重新執行（`idle_timeout`）。可能超過的工作要先取得鎖，避免同時執行兩次。取不到鎖時要丟出例外讓它稍後重試，不要直接結束：持有鎖的 worker 可能已經當機，直接結束的話工作會被 ack，就再也不會執行（scheduler 定時執行的掃描工作可以直接結束，下一次會補上）。
