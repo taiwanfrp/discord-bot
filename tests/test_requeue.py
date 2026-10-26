@@ -6,8 +6,6 @@ from unittest.mock import AsyncMock, call
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.base import Base
-from bot.db.engine import create_engine
 from bot.db.models import (
     DeliveryStatus,
     Source,
@@ -19,15 +17,14 @@ from bot.db.models import (
 )
 from bot.db.types import utcnow
 from bot.worker import tasks
+from tests.database import create_test_engine
 
 OLD = timedelta(minutes=20)
 
 
 @pytest.fixture
 async def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession]:
-    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await create_test_engine(tmp_path)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(tasks, "get_sessionmaker", lambda: sessionmaker)
     async with sessionmaker() as session:

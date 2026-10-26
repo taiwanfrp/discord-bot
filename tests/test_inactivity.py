@@ -10,12 +10,11 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.base import Base
-from bot.db.engine import create_engine
 from bot.db.models import GuildSettings, Source, Ticket, TicketCategory, TicketEvent, TicketStatus
 from bot.db.types import utcnow
 from bot.tickets import inactivity
 from tests.api.helpers import FakeGuild, make_text_channel
+from tests.database import create_test_engine
 
 OPENER = 5
 DAY = timedelta(days=1)
@@ -23,9 +22,7 @@ DAY = timedelta(days=1)
 
 @pytest.fixture
 async def sessionmaker(tmp_path: Path) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await create_test_engine(tmp_path)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         db.add(TicketCategory(name="帳務"))

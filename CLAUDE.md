@@ -24,7 +24,9 @@ uv run taskiq scheduler bot.worker.scheduler:scheduler bot.worker.tasks     # �
 uv run ruff check --fix              # lint（含 import 排序）
 uv run ruff format                   # 格式化
 uv run mypy                          # 型別檢查（strict）
-uv run pytest                        # 測試
+uv run pytest                        # 測試（每個測試一個新的 SQLite 檔案）
+docker compose --profile db up -d --wait   # 測試用的 MySQL、MariaDB、PostgreSQL（資料不保留）
+uv run pytest --db mysql             # 換成其他資料庫測試：mysql、mariadb、postgres
 uv run pre-commit run --all-files    # 跑全部 hook（只會檢查 git 已追蹤的檔案）
 uv run alembic upgrade head          # 套用 migration
 uv run alembic revision --autogenerate -m "add ..."   # 修改 models 後產生 migration（產生後要檢查內容）
@@ -76,7 +78,10 @@ Dockerfile           # bot、worker、scheduler 共用的 image；放進去的�
 - Enum 使用 `native_enum=False`（存成字串）。model 裡的 enum 繼承 `StrEnum`，會自動存成它的值。
 - 時間一律以 UTC 儲存。model 裡寫 `Mapped[datetime]` 會自動使用 `UTCDateTime`（只接受帶時區的 datetime），現在時間用 `bot.db.types.utcnow()`；不使用資料庫的 `now()` 預設值，因為各資料庫的時區行為不同。
 - 自增主鍵與外鍵用 `Integer`（SQLite 只有 `INTEGER PRIMARY KEY` 會自動遞增）。
-- MySQL / MariaDB 使用 `utf8mb4`。
+- MySQL / MariaDB 使用 `utf8mb4`。連線的隔離等級是 `READ COMMITTED`（`bot/db/engine.py`，原因見 docs/tickets.md 13.1）。
+- 修改 models、migration，或是用到交易、鎖、帶條件的 UPDATE 的程式時，用 `--db mysql`、`--db mariadb`、`--db postgres` 都跑過測試。
+- migration 的 downgrade 刪除資料表時直接 `drop_table`，不要先刪它的索引（MySQL / MariaDB 不能刪除外鍵用到的索引；Alembic 自動產生的會先刪，要改掉）。
+- 測試的資料庫一律用 `tests/database.py` 的 `create_test_engine(tmp_path)`，不要寫死 SQLite，才能用 `--db` 換成其他資料庫。
 - MetaData 設定 `naming_convention`；Alembic 開啟 `render_as_batch=True`（SQLite 需要）。
 - 不使用任何單一資料庫專屬的語法或型別。
 - 標示加密的欄位（訊息內容等）使用 `EncryptedText` 型別；加密金鑰只來自環境變數。

@@ -27,7 +27,9 @@
 - [x] Alembic（async 樣板、`render_as_batch=True`）與第一個 migration
 - [x] 主要的索引（見 `docs/tickets.md` 第 13 節）
 - [x] 安裝 aiomysql（MySQL、MariaDB）、asyncpg（PostgreSQL）
-- [ ] 用 docker compose 準備 MySQL、MariaDB、PostgreSQL、Redis、Silo（`pgsty/silo`，MinIO 的社群分支，本機測試 S3），三種資料庫都跑過 `alembic upgrade head` 和測試
+- [x] 用 docker compose 準備 MySQL、MariaDB、PostgreSQL、Redis、Silo（`pgsty/silo`，MinIO 的社群分支，本機測試 S3），三種資料庫都跑過 `alembic upgrade head` 和測試
+  - MySQL 8.4、MariaDB 11.8、PostgreSQL 18 放在 `compose.yaml` 的 `db` profile；`uv run pytest --db mysql` 等，migration 測試也包括 upgrade、check、downgrade 再 upgrade
+  - 找到並修正：MySQL / MariaDB 的 downgrade 不能先刪外鍵用到的索引；MariaDB 11.8 在 `REPEATABLE READ` 下帶條件的 UPDATE 會失敗（錯誤 1020），連線改用 `READ COMMITTED`
 
 ## 2. Queue 與 worker
 

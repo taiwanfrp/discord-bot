@@ -12,18 +12,15 @@ from bot.api.deps import Viewer
 from bot.api.routes.events import event_stream
 from bot.api.sse import EventHub
 from bot.core.permissions import NO_ACCESS
-from bot.db.base import Base
-from bot.db.engine import create_engine
 from bot.db.models import Source, Ticket, TicketCategory, TicketEvent
+from tests.database import create_test_engine
 
 OPENER = 5
 
 
 @pytest.fixture
 async def maker(tmp_path: Path) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await create_test_engine(tmp_path)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         category = TicketCategory(name="帳務")

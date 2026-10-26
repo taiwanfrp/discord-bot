@@ -9,12 +9,11 @@ import discord
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.base import Base
-from bot.db.engine import create_engine
 from bot.db.models import Source, Ticket, TicketCategory, TicketStatus
 from bot.db.types import utcnow
 from bot.tickets import rating
 from bot.tickets.errors import TicketError
+from tests.database import create_test_engine
 
 OPENER = 5
 
@@ -23,9 +22,7 @@ OPENER = 5
 async def sessionmaker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await create_test_engine(tmp_path)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(rating, "get_sessionmaker", lambda: maker)
     async with maker() as db:

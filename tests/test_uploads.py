@@ -7,8 +7,6 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.base import Base
-from bot.db.engine import create_engine
 from bot.db.models import (
     AttachmentStatus,
     Source,
@@ -20,15 +18,14 @@ from bot.db.models import (
 )
 from bot.db.types import utcnow
 from bot.storage import uploads
+from tests.database import create_test_engine
 from tests.fake_s3 import FakeS3
 from tests.test_files import EXE, PNG
 
 
 @pytest.fixture
 async def db(tmp_path: Path) -> AsyncIterator[AsyncSession]:
-    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await create_test_engine(tmp_path)
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         yield session
     await engine.dispose()

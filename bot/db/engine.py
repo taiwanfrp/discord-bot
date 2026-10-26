@@ -13,6 +13,11 @@ from bot.core.config import get_settings
 
 def create_engine(url: str, *, sqlite_foreign_keys: bool = True) -> AsyncEngine:
     parsed = make_url(url)
+    if parsed.get_backend_name() in ("mysql", "mariadb"):
+        # MySQL / MariaDB 預設是 REPEATABLE READ：交易裡讀過的資料之後不會更新，而且 MariaDB 11.8
+        # 起（innodb_snapshot_isolation）更新被其他交易改過的資料會直接失敗，不會依照最新的資料
+        # 判斷條件。改成跟 PostgreSQL 一樣的 READ COMMITTED，帶條件的 UPDATE 才能正確判斷
+        return _create_async_engine(url, pool_pre_ping=True, isolation_level="READ COMMITTED")
     if parsed.get_backend_name() != "sqlite":
         return _create_async_engine(url, pool_pre_ping=True)
 

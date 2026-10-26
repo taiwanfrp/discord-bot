@@ -13,19 +13,16 @@ from bot.api.app import create_app
 from bot.api.deps import get_db, get_db_sessionmaker
 from bot.api.sse import EventHub
 from bot.core.redis import get_redis, get_session_redis
-from bot.db.base import Base
-from bot.db.engine import create_engine
 from bot.db.models import PermissionRole, RoleKind
 from bot.worker import tasks
 from tests.api.helpers import ADMIN_ROLE_ID, Env, FakeBot
+from tests.database import create_test_engine
 from tests.fake_s3 import FakeS3
 
 
 @pytest.fixture
 async def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Env]:
-    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await create_test_engine(tmp_path)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     async with sessionmaker() as session:
         session.add(PermissionRole(role_id=ADMIN_ROLE_ID, kind=RoleKind.ADMIN))

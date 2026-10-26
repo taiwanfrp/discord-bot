@@ -23,6 +23,27 @@ os.environ["PUBLIC_BASE_URL"] = "https://bot.test"
 os.environ["WEB_TICKET_URL"] = "https://web.test/tickets/{id}"
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    from tests.database import DATABASES
+
+    parser.addoption(
+        "--db",
+        choices=list(DATABASES),
+        default="sqlite",
+        help="測試用的資料庫；sqlite 以外的要先 docker compose --profile db up -d --wait",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    from tests import database
+
+    database.url = database.DATABASES[config.getoption("--db")]
+
+
+def pytest_report_header(config: pytest.Config) -> str:
+    return f"database: {config.getoption('--db')}"
+
+
 @pytest.fixture(autouse=True)
 def published_events(monkeypatch: pytest.MonkeyPatch) -> Iterator[AsyncMock]:
     """commit 後推送 ticket_event 的 hook 不連 Redis；測試可以檢查推送了哪些事件。"""

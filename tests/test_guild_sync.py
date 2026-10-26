@@ -8,9 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot.cogs import guild_sync
-from bot.db.base import Base
-from bot.db.engine import create_engine
 from bot.db.models import GuildSettings, PermissionRole, RoleKind, TicketCategory
+from tests.database import create_test_engine
 
 # tests/conftest.py 設定的 GUILD_ID
 GUILD = SimpleNamespace(id=1)
@@ -18,9 +17,7 @@ GUILD = SimpleNamespace(id=1)
 
 @pytest.fixture
 async def cog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
-    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await create_test_engine(tmp_path)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     async with sessionmaker() as session:
         session.add(GuildSettings(id=1, log_channel_id=5, panel_channel_id=5, panel_message_id=9))

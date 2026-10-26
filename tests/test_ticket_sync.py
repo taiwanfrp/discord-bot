@@ -11,11 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.cogs import tickets as tickets_cog
-from bot.db.base import Base
-from bot.db.engine import create_engine
 from bot.db.models import Source, Ticket, TicketCategory, TicketEvent, TicketStatus
 from bot.tickets.permissions import MEMBER_PERMISSIONS, sync_role_overwrites
 from tests.api.helpers import make_role, make_text_channel
+from tests.database import create_test_engine
 
 GUILD_ID = 1
 
@@ -48,9 +47,7 @@ async def test_sync_role_overwrites() -> None:
 async def sessionmaker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await create_test_engine(tmp_path)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(tickets_cog, "get_sessionmaker", lambda: maker)
     yield maker

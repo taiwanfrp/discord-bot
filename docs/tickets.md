@@ -543,6 +543,15 @@ ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
 - `ticket(status, closed_at)`：找出私訊還沒處理完的客服單。
 - `ticket_message(ticket_id, id)`、`ticket_event(ticket_id, id)`：依照順序分頁讀取、SSE 補送。
 
+### 13.1 各資料庫的差異
+
+SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能通過（`uv run pytest --db mysql` 等，資料庫用 `compose.yaml` 的 `db` profile）。已經處理的差異：
+
+- **交易隔離等級**：MySQL / MariaDB 的連線改用 `READ COMMITTED`，跟 PostgreSQL 的預設一樣。程式裡很多地方用「帶條件的 UPDATE，看更新了幾筆」來處理同時操作（評分、閒置提醒、附件），要依照最新 commit 的資料判斷。預設的 `REPEATABLE READ` 下，MariaDB 11.8 起（`innodb_snapshot_isolation`）更新一筆讀過之後被其他交易改過的資料，會直接失敗（錯誤 1020），而不是更新 0 筆。
+- **時間**：MySQL / MariaDB 的 `DATETIME` 預設只到秒，所以指定到微秒（`fsp=6`）。
+- **字元集**：連線指定 `charset=utf8mb4`，資料表則使用資料庫的預設字元集。MySQL 8.0、MariaDB 11.6 起預設就是 `utf8mb4`；舊版的預設可能是 `latin1`，所以建立資料庫時要指定 `CHARACTER SET utf8mb4`，否則存不進中文和 emoji。
+- **migration 的 downgrade**：MySQL / MariaDB 不能刪除外鍵用到的索引，所以刪除資料表時直接刪，不要先刪它的索引。Alembic 自動產生的 downgrade 會先刪索引，要手動改掉。
+
 ## 14. API
 
 - bot 有自己的網域，endpoint 直接放在根路徑底下。

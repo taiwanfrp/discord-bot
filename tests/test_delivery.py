@@ -11,8 +11,6 @@ from fakeredis import FakeAsyncRedis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.base import Base
-from bot.db.engine import create_engine
 from bot.db.models import (
     AttachmentStatus,
     DeliveryStatus,
@@ -27,6 +25,7 @@ from bot.db.models import (
 )
 from bot.storage.share import hash_token
 from bot.tickets import delivery
+from tests.database import create_test_engine
 
 
 class FakeWebhook:
@@ -111,9 +110,7 @@ class Env:
 
 @pytest.fixture
 async def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Env]:
-    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    engine = await create_test_engine(tmp_path)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     async with sessionmaker() as db:
         env = Env(db, sessionmaker)
