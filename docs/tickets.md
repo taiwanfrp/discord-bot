@@ -435,19 +435,22 @@ bot、worker、scheduler 三個服務使用同一個 image（`Dockerfile`），�
 
 本機建立 image：`docker build -t taiwanfrp-discord-bot .`。放進 image 的檔案由 `.dockerignore` 的白名單決定。
 
-image 由 GitHub Actions 建立，推送到 `ghcr.io/taiwanfrp/discord-bot`。`ci.yml` 的檢查、測試都通過後，才呼叫 `build.yml`（reusable workflow）建立 image：
+image 由 GitHub Actions 建立，推送到 `ghcr.io/taiwanfrp/discord-bot`，有 `linux/amd64` 與 `linux/arm64` 兩種架構。`ci.yml` 的檢查、測試都通過後，才呼叫 `build.yml`（reusable workflow）建立 image：
 
 ```mermaid
 flowchart LR
     push[push 到 main] --> lint[pre-commit] & test[pytest：四種資料庫]
-    lint & test --> build[build.yml：建立 image、smoke test]
-    build --> ghcr[推送 sha-前 7 碼、latest]
+    lint & test --> amd64[amd64 runner：建立、smoke test] & arm64[arm64 runner：建立、smoke test]
+    amd64 & arm64 --> ghcr[合併成 sha-前 7 碼、latest]
 ```
 
+- **兩種架構**各自在對應的 runner 上建立、跑 smoke test，不用模擬，所以 arm64 的 image 也是在 arm64 上測過的。推送後再合併成同一個 tag，拉的時候會自動選對應的架構。
 - **tag**：`sha-<commit 的前 7 碼>`，以及 `latest`（最新一個通過的 main）。GHCR 上只有檢查、測試、smoke test 都通過的 commit。部署平台用 `latest`。
+  - 合併前的 `sha-<前 7 碼>-amd64`、`-arm64` 只有單一架構，部署時不要用。
 - **PR** 也會在測試通過後建立 image、跑 smoke test，但不推送。
 - 很快連續 push 時，前一次還沒跑完的會被取消，只有最新的會推送。
 - **退回舊版**：部署平台改用那一版的 `sha-` tag。migration 只保證跟上一版的程式相容，所以沒有執行 downgrade 的話，只能退回上一版。在 GitHub 上重新執行舊的 CI，`latest` 也會指回那一版。
+- 依賴的套件要有 arm64 的 wheel（或是純 Python）：image 裡沒有編譯工具，沒有的話 arm64 的建立會失敗。
 
 | 服務 | 指令 | 同時執行 | 更新方式 | 停止的等待時間 |
 |---|---|---|---|---|

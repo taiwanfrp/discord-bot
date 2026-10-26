@@ -139,6 +139,8 @@
 - [x] 在 GitHub 上確認 CI 第一次執行通過
 - [x] `build.yml`（檢查、測試通過後由 `ci.yml` 呼叫）：建立 image、smoke test，main 推送 `sha-` tag 與 `latest` 到 GHCR
 - [x] 在 GitHub 上確認 CI 通過後推送成功（`sha-` tag 與 `latest`）
+- [x] arm64 的 image：在 arm64 的 runner 上建立、smoke test，跟 amd64 合併成同一個 tag
+- [ ] 在 GitHub 上確認兩種架構都推送成功，arm64 的機器拉得到、跑得起來
 - [ ] 決定 GHCR 的 package 要不要公開（目前是私人的，部署平台拉 image 要用有 `read:packages` 的 token 登入）
 - [ ] 在部署平台上設定並部署，順便做第 8 步用公開的 S3 與 bot 網址的測試
 

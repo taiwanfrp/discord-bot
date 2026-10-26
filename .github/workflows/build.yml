@@ -1,4 +1,4 @@
-# 由 ci.yml 在檢查、測試通過後呼叫：建立 image、smoke test，main 推送到 GHCR
+# 由 ci.yml 在檢查、測試通過後呼叫：在各自的 runner 上建立 amd64、arm64 的 image 並 smoke test，main 推送到 GHCR
 name: Build
 
 on:
@@ -6,26 +6,48 @@ on:
 
 jobs:
   image:
-    name: Build
-    runs-on: ubuntu-latest
+    name: Build (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       # GHCR 只接受小寫
       - name: Build
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA::7}-${{ matrix.arch }}"
           echo "IMAGE=$image" >> "$GITHUB_ENV"
-          docker build -t "$image:sha-${GITHUB_SHA::7}" -t "$image:latest" \
+          docker build -t "$image" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" .
       - name: Smoke test
-        run: .github/smoke-test.sh "$IMAGE:latest"
+        run: .github/smoke-test.sh "$IMAGE"
       - name: Push
         if: github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker push "$IMAGE:sha-${GITHUB_SHA::7}"
-          docker push "$IMAGE:latest"
+          docker push "$IMAGE"
+
+  # 兩種架構合併成同一個 tag，拉的時候自動選對應的架構
+  manifest:
+    name: Push multi-arch tags
+    needs: image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag="$image:sha-${GITHUB_SHA::7}"
+          docker buildx imagetools create -t "$tag" -t "$image:latest" "$tag-amd64" "$tag-arm64"
