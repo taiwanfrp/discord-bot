@@ -433,7 +433,23 @@ GET /a/<attachment_id>/<token>
 
 bot、worker、scheduler 三個服務使用同一個 image（`Dockerfile`），只有啟動指令不同。image 的工作目錄是 `/app`，用非 root 的使用者執行。設定全部來自環境變數，image 裡沒有 `.env`。
 
-建立 image：`docker build -t taiwanfrp-discord-bot .`。放進 image 的檔案由 `.dockerignore` 的白名單決定。
+本機建立 image：`docker build -t taiwanfrp-discord-bot .`。放進 image 的檔案由 `.dockerignore` 的白名單決定。
+
+image 由 GitHub Actions 建立，推送到 `ghcr.io/taiwanfrp/discord-bot`：
+
+```mermaid
+flowchart LR
+    push[push 到 main] --> ci[ci.yml：pre-commit、四種資料庫的測試、smoke test]
+    ci -- 全部通過 --> build[build.yml：建立 image、smoke test]
+    build --> ghcr[推送 sha-前 7 碼、latest]
+```
+
+- **`build.yml` 在 `ci.yml` 全部通過後才執行**（`workflow_run`），所以 GHCR 上只有檢查、測試都通過的 commit。兩個 workflow 不能同時跑，因為 workflow 之間沒辦法等待對方的結果；建立加上推送大約半分鐘。
+- **tag**：`sha-<commit 的前 7 碼>`，以及 `latest`（最新一個通過的 main）。部署平台用 `latest`。
+- `build.yml` 自己重新建立 image，推送前再跑一次同樣的 smoke test（`.github/smoke-test.sh`）。
+- **PR** 只在 `ci.yml` 裡建立 image、跑 smoke test，不推送。
+- 很快連續 push 時，前一次還沒跑完的 CI 會被取消，只有最新的 commit 會建立 image。`build.yml` 依照順序一次執行一個，舊的 commit 不會蓋掉 `latest`。
+- **退回舊版**：部署平台改用那一版的 `sha-` tag。migration 只保證跟上一版的程式相容，所以沒有執行 downgrade 的話，只能退回上一版。在 GitHub 上重新執行舊的 CI，`latest` 也會指回那一版。
 
 | 服務 | 指令 | 同時執行 | 更新方式 | 停止的等待時間 |
 |---|---|---|---|---|

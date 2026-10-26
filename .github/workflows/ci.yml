@@ -1,4 +1,4 @@
-# 檢查與測試：push 到 main、PR 時執行，內容跟本機的 pre-commit、pytest 一樣
+# 檢查與測試：push 到 main、PR 時執行，內容跟本機的 pre-commit、pytest 一樣；main 通過後由 build.yml 推送 image
 name: CI
 
 on:
@@ -58,6 +58,7 @@ jobs:
         run: docker compose --profile db up -d --wait ${{ matrix.db }}
       - run: uv run pytest --db ${{ matrix.db }}
 
+  # 確認 image 建得起來、跑得起來；推送到 GHCR 在 build.yml（CI 通過後才執行）
   docker:
     name: Docker image
     runs-on: ubuntu-latest
@@ -65,22 +66,5 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker build -t taiwanfrp-discord-bot .
-      # image 裡有需要的檔案與套件（.dockerignore 是白名單）：
-      # migration 跑得起來，三個服務的模組都 import 得到。設定是假的，不會連到任何服務
       - name: Smoke test
-        run: |
-          cat > ci.env <<'EOF'
-          DISCORD_TOKEN=ci
-          GUILD_ID=1
-          DATABASE_URL=sqlite+aiosqlite:///data/bot.db
-          REDIS_URL=redis://127.0.0.1:1
-          SESSION_REDIS_URL=redis://127.0.0.1:1
-          ENCRYPTION_KEYS=ci
-          S3_ACCESS_KEY_ID=ci
-          S3_SECRET_ACCESS_KEY=ci
-          S3_BUCKET=ci
-          PUBLIC_BASE_URL=https://bot.test
-          WEB_TICKET_URL=https://web.test/tickets/{id}
-          EOF
-          docker run --rm --env-file ci.env taiwanfrp-discord-bot sh -c \
-            'alembic upgrade head && python -c "import main, bot.worker.tasks, bot.worker.scheduler"'
+        run: .github/smoke-test.sh taiwanfrp-discord-bot

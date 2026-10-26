@@ -9,7 +9,7 @@ TaiwanFRP 的 Discord bot，只服務單一伺服器。主要功能是客服單�
 ## 開發流程
 
 - 程式碼必須通過 ruff、mypy（strict）、pytest。
-- GitHub Actions（`.github/workflows/ci.yml`）在 push 到 main 與 PR 時執行：pre-commit 的檢查、四種資料庫的 pytest、建立 Docker image 並跑 smoke test。uv 的版本跟 `Dockerfile` 一樣，升級時兩邊一起改。
+- GitHub Actions（`.github/workflows/ci.yml`）在 push 到 main 與 PR 時執行：pre-commit 的檢查、四種資料庫的 pytest、建立 Docker image 並跑 smoke test。main 的 CI 全部通過後，`.github/workflows/build.yml` 建立 image 並推送到 GHCR（docs/tickets.md 11.3）。uv 的版本跟 `Dockerfile` 一樣，升級時兩邊一起改。
 - 每個測試（包括 fixture 的收尾）最多 60 秒（pytest-timeout，設定在 `pyproject.toml`），卡住時會直接失敗並印出卡在哪裡。
 - 一個步驟完成就 commit 一次。commit 訊息用 Conventional Commits，**一句話**，例如 `feat: add ticket panel`。
 - 文件裡的圖使用 Mermaid。
@@ -56,6 +56,8 @@ docs/auth.md         # 身分驗證
 TODO.md
 Dockerfile           # bot、worker、scheduler 共用的 image；放進去的檔案由 .dockerignore 的白名單決定
 .github/workflows/ci.yml   # CI：pre-commit、四種資料庫的測試、image 的 smoke test
+.github/workflows/build.yml   # CI 通過後建立 image，推送到 GHCR（sha- tag 與 latest）
+.github/smoke-test.sh     # image 的 smoke test（兩個 workflow 共用）
 ```
 
 ## 程式慣例
