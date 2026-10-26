@@ -50,6 +50,7 @@
 - [x] 每個請求的驗證：ticket session → 主要 API 的 session → Discord ID，查詢失敗回傳 503
 - [x] 權限判斷（管理員、分類身份組），從伺服器成員快取讀取身份組；不在伺服器裡的使用者改用 REST API 取得資料，只能存取自己的客服單（開單者的判斷在客服單的 API 裡做）
 - [x] `GET /health`、`GET /me`
+- [x] gzip 壓縮回應（SSE 不壓縮）
 - [x] `GET /guild/channels`、`GET /guild/roles`
 - [ ] 主要 API 依照 `docs/auth.md` 第 5 節實作：`__Host-session` cookie、session 的格式、`POST /auth/ticket-code`（不在這個 repo）
 - [ ] session store 的專用 ACL 帳號（只能讀取 session、讀取並刪除授權碼）

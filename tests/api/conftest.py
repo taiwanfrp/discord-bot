@@ -52,7 +52,7 @@ async def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="https://bot.test") as client:
-        env = Env(client, bot, sessions, sessionmaker)
+        env = Env(client, bot, sessions, sessionmaker, app)
         env.sync_permissions = sync_permissions
         env.verify = verify
         env.deliver = deliver

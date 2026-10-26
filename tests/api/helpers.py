@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 from fakeredis import FakeAsyncRedis
+from fastapi import FastAPI
 from httpx import AsyncClient, Response
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -174,8 +175,11 @@ class Env:
         bot: FakeBot,
         sessions: FakeAsyncRedis,
         sessionmaker: async_sessionmaker[AsyncSession],
+        app: FastAPI,
     ) -> None:
         self.client = client
+        # 直接呼叫 ASGI app 用（例如只讀 SSE 的 header；httpx 會等回應全部讀完）
+        self.app = app
         self.bot = bot
         self.guild = bot.guild
         self.sessions = sessions

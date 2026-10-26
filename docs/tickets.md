@@ -557,6 +557,8 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
 - bot 有自己的網域，endpoint 直接放在根路徑底下。
 - 除了 `GET /health`、`POST /auth/exchange`、`GET /a/{attachment_id}/{token}` 以外，所有 endpoint 都需要登入（bot 的 cookie），權限依照第 4 節判斷。
 - Discord ID 在 JSON 裡一律用**字串**，因為 snowflake 超過 JavaScript 的安全整數範圍。
+- 回應用 gzip 壓縮（`GZipMiddleware`，等級 6），瀏覽器會自動解壓縮。小於 500 bytes 的回應不壓縮；SSE（`text/event-stream`）也不壓縮，否則事件會被緩衝住，不能即時送到瀏覽器。
+  - BREACH 攻擊要回應裡同時有祕密和攻擊者能控制的內容。這裡的 cookie 在 header 裡，不會被壓縮；回應裡的 presigned URL，也是看得到這張單的人本來就拿得到的，所以沒有實際的風險。
 - 列表類的 endpoint（客服單、訊息）使用 cursor 分頁（`?before=<id>&limit=50`，`limit` 最多 100），不用 offset：訊息一直在增加，用 offset 會漏掉或重複。
   - `GET /tickets`：新的在前面，下一頁用這一頁最後一筆的 id 當作 `before`。篩選：`status`、`category_id`、`opener_id`、`claimed_by_id`、`claimed`（`false` 是還沒有人接手）、`q`（開單者的名稱，不分大小寫）。每一筆附上開單者與接手的人的快照。
   - `GET /tickets/{id}/messages`：舊的在前面。沒有指定時是最新的 `limit` 則；`before` 往前翻頁（用這一頁第一則的 id）；`after` 取得之後的訊息（收到 SSE 的 `message.created`、`message.updated` 時）。回應的 `users` 是這些訊息的作者的快照。

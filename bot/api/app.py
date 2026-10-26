@@ -8,6 +8,7 @@ import uvicorn
 from discord.ext import commands
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from bot.api.csrf import CSRFMiddleware
 from bot.api.deps import BotDep, UserCache
@@ -48,6 +49,9 @@ def create_app(bot: commands.Bot, event_hub: EventHub, s3: S3Client) -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "Last-Event-ID"],
     )
+    # 最外層：壓縮回應（訊息的 JSON 可能有幾百 KB）。SSE（text/event-stream）預設不壓縮，
+    # 事件才不會被緩衝；小於 500 bytes 的也不壓縮。等級 9 只比 6 小 1～2%，時間卻多了快一倍
+    app.add_middleware(GZipMiddleware, compresslevel=6)
 
     for module in (
         auth,
