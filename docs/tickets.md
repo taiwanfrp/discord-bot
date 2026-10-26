@@ -475,6 +475,15 @@ flowchart LR
 - **migration**：每次部署先用同一個 image 執行一次 `alembic upgrade head`，再更新三個服務。部署期間新舊版本會同時執行一段時間（migration 時舊版本還在跑，worker 也可以先啟動新的），所以 migration 和工作的參數都要跟上一版相容：
   - 新增欄位要允許 NULL，或是有預設值。
   - 刪除欄位或改名要分兩次部署：先讓程式不再使用，下一次再刪除。
+- **`compose.prod.yaml`**：正式環境用的 compose，照上面的表格設定好四個服務，PostgreSQL、Redis 也一起啟動。用 `docker compose -f compose.prod.yaml up -d` 部署或更新，也可以交給支援 compose 的部署平台。
+  - PostgreSQL 通過健康檢查後才跑 `migrate`；`migrate` 跑完（`service_completed_successfully`）、Redis 通過健康檢查，才啟動或更新其他三個。`migrate` 每次 `up` 都會再跑一次，已經是最新版本時什麼都不做。
+  - `DATABASE_URL`、`REDIS_URL` 固定連到裡面的 PostgreSQL、Redis，只要設定 `POSTGRES_PASSWORD`。密碼會放進網址，用 `openssl rand -hex 32` 這種只有英數字的，才不用跳脫。
+  - PostgreSQL、Redis 沒有對外的 port。資料存在 `postgres-data`、`redis-data` 兩個 volume，`docker compose down` 會保留，加上 `-v` 才會刪除。Redis 開啟 `appendonly`，重啟後 queue 裡的工作不會遺失。
+  - 備份：`docker compose -f compose.prod.yaml exec -T postgres pg_dump -U ticket_bot ticket_bot > backup.sql`，加密金鑰（`ENCRYPTION_KEYS`）要另外備份。PostgreSQL 的大版本（image 的 `18`）不能直接改，要先 dump 再匯入新版本。
+  - 環境變數四個服務共用同一組，從 shell 或同一個資料夾的 `.env` 讀取。必填的用 `${VAR:?}` 標示，沒有填就不能啟動；選填的只寫名稱，沒有設定時用程式的預設值。
+  - `IMAGE_TAG` 預設是 `latest`，退回舊版時改成那一版的 `sha-` tag。
+  - `docker compose up -d` 更新時，會先停止舊的容器再啟動新的，符合 bot、scheduler 的要求。worker 也一樣，要等目前的工作完成（最多 30 分鐘）才會換成新版本。
+  - bot 的 port 只綁在主機的 `127.0.0.1:8000`，給同一台主機上的 reverse proxy 連。bot 看到的來源 IP 是 Docker 網路的 gateway（例如 `172.17.0.1`），不是 `127.0.0.1`，而且每次建立網路可能不同，所以 `FORWARDED_ALLOW_IPS` 填 Docker 用的私有網段，例如 `172.16.0.0/12,192.168.0.0/16`。reverse proxy 也跑在容器裡時，可以用 override 檔讓 bot 加入它的網路。
 - **健康檢查**：只有 bot 有 HTTP（`GET /health`）。image 裡沒有 curl，可以用 `python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"`。三個服務共用 image，所以健康檢查不寫在 `Dockerfile` 裡。
 - **網路**：image 預設 `API_HOST=0.0.0.0`。API 的 port（`API_PORT`，預設 8000）只讓自己的 reverse proxy 連進來，`FORWARDED_ALLOW_IPS` 設成 reverse proxy 的 IP（`docs/auth.md` 第 8 節）。worker、scheduler 不需要對外的 port。
 - **SQLite** 只適合開發或單一主機：三個服務要掛同一個 volume 在 `/app/data`，而且容器裡的使用者（uid 10001）要能寫入。正式環境使用 MySQL、MariaDB 或 PostgreSQL。

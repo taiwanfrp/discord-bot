@@ -1,0 +1,96 @@
+# 正式環境，說明見 docs/tickets.md 11.3，環境變數見 .env.example
+x-env: &env
+  DISCORD_TOKEN: ${DISCORD_TOKEN:?}
+  GUILD_ID: ${GUILD_ID:?}
+  DATABASE_URL: postgresql+asyncpg://ticket_bot:${POSTGRES_PASSWORD:?}@postgres/ticket_bot
+  REDIS_URL: redis://redis:6379
+  SESSION_REDIS_URL: ${SESSION_REDIS_URL:?}
+  ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:?}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?}
+  S3_BUCKET: ${S3_BUCKET:?}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?}
+  WEB_TICKET_URL: ${WEB_TICKET_URL:?}
+  API_CORS_ORIGINS: ${API_CORS_ORIGINS:?}
+  FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:?}
+  # 沒有設定時用程式的預設值
+  S3_ENDPOINT:
+  S3_REGION:
+  S3_PRESIGN_TTL:
+  AUTH_COOKIE_NAME:
+  TICKET_SESSION_TTL:
+
+x-app: &app
+  image: ghcr.io/taiwanfrp/discord-bot:${IMAGE_TAG:-latest}
+  pull_policy: always
+  restart: unless-stopped
+  environment: *env
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ticket_bot
+      POSTGRES_USER: ticket_bot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      # 初始化期間的暫時 server 不聽 TCP
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ticket_bot", "-d", "ticket_bot"]
+      interval: 30s
+      start_period: 60s
+      start_interval: 2s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 30s
+      start_period: 60s
+      start_interval: 2s
+
+  migrate:
+    image: ghcr.io/taiwanfrp/discord-bot:${IMAGE_TAG:-latest}
+    pull_policy: always
+    command: ["alembic", "upgrade", "head"]
+    environment: *env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bot:
+    <<: *app
+    ports:
+      - "127.0.0.1:8000:8000"
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      # 啟動時可能要等上一個 bot 的鎖（最多 30 秒）
+      start_period: 60s
+      start_interval: 2s
+
+  worker:
+    <<: *app
+    command: ["taskiq", "worker", "bot.worker.broker:broker", "bot.worker.tasks", "--workers", "1"]
+    stop_grace_period: 30m
+
+  scheduler:
+    <<: *app
+    command: ["taskiq", "scheduler", "bot.worker.scheduler:scheduler", "bot.worker.tasks"]
+
+volumes:
+  postgres-data:
+  redis-data:
