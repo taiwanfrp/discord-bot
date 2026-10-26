@@ -436,11 +436,17 @@ bot、worker、scheduler 三個服務使用同一個 image（`Dockerfile`），�
 
 - **bot 同一時間只能有一個**：如果滾動更新先啟動新版本、再停止舊版本，會有一段時間兩個 bot 同時連著 Discord，事件會被處理兩次（例如訊息被存兩次）。代價是更新時 bot 會中斷幾秒，API 與 Discord 上的按鈕暫時沒有回應。
 - **scheduler 也只能有一個**：有兩個的話，定時工作會被放進 queue 兩次。
+- 程式也會用 **Redis 鎖**保證 bot 和 scheduler 只有一個在執行（`ticket-bot:lock:bot`、`ticket-bot:lock:scheduler`，`bot/core/instance_lock.py`）：
+  - 啟動時先取得鎖，取不到就一直等，log 會寫 `Another bot is running, waiting for it to stop`。bot 取得鎖之後才登入 Discord、啟動 API；scheduler 取得鎖之後才開始放入工作。等待期間收到 `SIGTERM` 會直接結束。
+  - 持有鎖的程序每 10 秒延長一次，鎖在 30 秒後過期。正常停止時會馬上釋放（bot 在 Discord 的連線關閉之後才釋放）；當機的話，其他的最多等 30 秒。
+  - 連不上 Redis 時繼續執行，每秒重試一次。鎖不見了（例如 Redis 重新啟動），而且還沒有被其他程序拿走時，直接拿回來。
+  - 發現鎖被其他程序拿走時（例如程序停住太久，鎖已經過期），馬上關閉，並用非 0 的狀態碼結束。
+  - 所以部署平台設錯成「先啟動新的」，也不會同時執行兩個，新的會等舊的停止。但如果平台要等新的通過健康檢查才停止舊的，新的在等鎖時還沒有啟動 API，健康檢查不會通過，部署就會卡住。所以平台還是要設定成「先停止舊的，再啟動新的」。
 - **停止的等待時間**是部署平台送出 `SIGTERM` 之後，等多久才強制停止：
   - worker 收到 `SIGTERM` 後不再接新工作，等目前的工作完成才結束。等待時間要比最長的工作（上傳 1 GB 的附件）還長，所以設成跟 `idle_timeout` 一樣的 30 分鐘。沒有工作在執行時，幾秒就會停止。等更久也沒有意義，因為超過 30 分鐘沒有 ack 的工作，本來就會被其他 worker 接手。
   - 被強制停止時工作不會遺失，但要等 30 分鐘才會被接手重新執行。
   - bot 關閉時，最多等 SSE 等連線 10 秒（`timeout_graceful_shutdown`），所以 30 秒就夠了。
-- **PID 1**：image 用 tini 當 PID 1，把 `SIGTERM` 轉給程式。PID 1 沒有自己處理的訊號會被忽略，而 scheduler 沒有處理 `SIGTERM`，沒有 tini 的話，就要等到被強制停止。換掉 `ENTRYPOINT` 時要注意這一點。
+- **PID 1**：image 用 tini 當 PID 1，把 `SIGTERM` 轉給程式。PID 1 沒有自己處理的訊號會被忽略。bot 和 scheduler 在等鎖的時候還沒有處理 `SIGTERM`（taskiq 的 scheduler 本身也沒有處理），沒有 tini 的話，就要等到被強制停止。換掉 `ENTRYPOINT` 時要注意這一點。
 - **migration**：每次部署先用同一個 image 執行一次 `alembic upgrade head`，再更新三個服務。部署期間新舊版本會同時執行一段時間（migration 時舊版本還在跑，worker 也可以先啟動新的），所以 migration 和工作的參數都要跟上一版相容：
   - 新增欄位要允許 NULL，或是有預設值。
   - 刪除欄位或改名要分兩次部署：先讓程式不再使用，下一次再刪除。

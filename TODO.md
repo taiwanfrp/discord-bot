@@ -129,6 +129,8 @@
 - [x] bot 服務設定成先停止舊的再啟動新的；scheduler 只執行一個（寫在 `docs/tickets.md` 11.3，部署平台照著設定）
 - [x] 停止的等待時間大於最長的工作（worker 30 分鐘、bot 30 秒）
 - [x] 實際測試（本機 Docker）：migration（新的資料庫、已經是最新版本的資料庫）、三個服務啟動、`SIGTERM` 後正常停止、worker 等跑到一半的工作完成、強制停止時工作留在 pending、沒有 tini 時 scheduler 會忽略 `SIGTERM`
+- [x] bot、scheduler 用 Redis 鎖保證同一時間只有一個（`ticket-bot:lock:bot`、`ticket-bot:lock:scheduler`）：取不到就等、定時延長、被拿走時用非 0 結束；scheduler 收到 `SIGTERM` 時正常關閉並釋放鎖
+- [x] 實際測試（本機 Docker）：第二個 bot、scheduler 會等待，超過鎖的有效期限也不會拿到；第一個停止後 1 秒內接手；等待中的被停止時馬上結束；鎖被拿走時用 exit 1 結束
 - [ ] 在部署平台上設定並部署，順便做第 8 步用公開的 S3 與 bot 網址的測試
 
 ## 12. 之後再做

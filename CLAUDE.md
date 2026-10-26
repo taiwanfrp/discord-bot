@@ -38,7 +38,7 @@ pre-commit：commit 時跑 ruff、mypy 與基本檢查，push 前跑 pytest。
 ```
 main.py              # 入口：讀取設定並啟動 bot
 bot/
-├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command、啟動 API）、設定、Redis 與事件通知、權限、Cog 基底類別、CommandTree（錯誤處理）
+├── core/            # 共用程式碼：Bot（自動載入 cogs、全域同步 slash command、啟動 API）、設定、Redis 與事件通知、只能有一個在執行的服務用的鎖（bot、scheduler）、權限、Cog 基底類別、CommandTree（錯誤處理）
 ├── api/             # HTTP API（FastAPI，跟 bot 在同一個程序）：routes、dependencies、CSRF
 ├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session、commit 後推送 ticket_event 的 hook
 ├── storage/         # S3（aiobotocore）、附件的檔案規則（副檔名、magic bytes、key）、附件與頭像存到 S3、網頁上傳（presigned URL、檢查）、分享連結

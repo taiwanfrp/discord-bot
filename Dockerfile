@@ -21,7 +21,7 @@ RUN python -m compileall -q bot migrations
 FROM python:3.12.15-slim-trixie
 
 # tini 當 PID 1，把 SIGTERM 轉給程式：PID 1 沒有自己處理的訊號會被忽略，
-# scheduler 沒有處理 SIGTERM，沒有 tini 的話要等到被強制停止
+# bot 與 scheduler 等鎖的時候還沒有處理 SIGTERM，沒有 tini 的話要等到被強制停止
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tini \
     && rm -rf /var/lib/apt/lists/*
