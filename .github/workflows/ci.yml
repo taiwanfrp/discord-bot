@@ -1,0 +1,85 @@
+# 檢查與測試：push 到 main、PR 時執行，內容跟本機的 pre-commit、pytest 一樣
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一個分支有新的 push 時，取消還在跑的
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: pre-commit（ruff、mypy 等）
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          # 跟 Dockerfile 一樣
+          version: "0.11.18"
+          cache-python: true
+      - run: uv sync --locked
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+      # 跟 commit 時的 hook 一樣。ruff 會自動修正的問題在這裡算失敗，並顯示要改哪裡
+      - run: uv run pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    name: pytest（${{ matrix.db }}）
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # 一個資料庫失敗時，其他的照樣跑完，才知道是不是只有那個資料庫有問題
+      fail-fast: false
+      matrix:
+        db: [sqlite, mysql, mariadb, postgres]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.11.18"
+          cache-python: true
+      - run: uv sync --locked
+      # compose.yaml 的 db profile（跟本機一樣，MySQL / MariaDB 的預設字元集故意是 latin1）
+      - name: Start ${{ matrix.db }}
+        if: matrix.db != 'sqlite'
+        run: docker compose --profile db up -d --wait ${{ matrix.db }}
+      - run: uv run pytest --db ${{ matrix.db }}
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t taiwanfrp-discord-bot .
+      # image 裡有需要的檔案與套件（.dockerignore 是白名單）：
+      # migration 跑得起來，三個服務的模組都 import 得到。設定是假的，不會連到任何服務
+      - name: Smoke test
+        run: |
+          cat > ci.env <<'EOF'
+          DISCORD_TOKEN=ci
+          GUILD_ID=1
+          DATABASE_URL=sqlite+aiosqlite:///data/bot.db
+          REDIS_URL=redis://127.0.0.1:1
+          SESSION_REDIS_URL=redis://127.0.0.1:1
+          ENCRYPTION_KEYS=ci
+          S3_ACCESS_KEY_ID=ci
+          S3_SECRET_ACCESS_KEY=ci
+          S3_BUCKET=ci
+          PUBLIC_BASE_URL=https://bot.test
+          WEB_TICKET_URL=https://web.test/tickets/{id}
+          EOF
+          docker run --rm --env-file ci.env taiwanfrp-discord-bot sh -c \
+            'alembic upgrade head && python -c "import main, bot.worker.tasks, bot.worker.scheduler"'
