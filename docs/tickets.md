@@ -423,10 +423,30 @@ GET /a/<attachment_id>/<token>
 
 ### 11.3 部署
 
-- bot、worker、scheduler 是三個服務，使用同一個 image。
-- **優雅關閉**：部署新版本時，部署平台通常會先送出 `SIGTERM`，等待一段時間後才強制停止。worker 收到 `SIGTERM` 時要停止接新工作，並等目前的工作完成。平台的等待時間要設得比最長的工作還長（例如上傳 1 GB 的檔案）。
-- **bot 服務同一時間只能有一個在執行**：如果滾動更新先啟動新版本、再停止舊版本，會有一段時間兩個 bot 同時連著 Discord，事件會被處理兩次（例如訊息被存兩次）。bot 服務要設定成「先停止舊的，再啟動新的」。worker 可以同時有多個。
-- scheduler 同一時間也只能有一個。
+bot、worker、scheduler 三個服務使用同一個 image（`Dockerfile`），只有啟動指令不同。image 的工作目錄是 `/app`，用非 root 的使用者執行。設定全部來自環境變數，image 裡沒有 `.env`。
+
+建立 image：`docker build -t taiwanfrp-discord-bot .`。放進 image 的檔案由 `.dockerignore` 的白名單決定。
+
+| 服務 | 指令 | 同時執行 | 更新方式 | 停止的等待時間 |
+|---|---|---|---|---|
+| bot | `python main.py`（image 的預設指令） | 只能 1 個 | 先停止舊的，再啟動新的 | 30 秒 |
+| worker | `taskiq worker bot.worker.broker:broker bot.worker.tasks --workers 1` | 1 個以上 | 可以先啟動新的 | 30 分鐘 |
+| scheduler | `taskiq scheduler bot.worker.scheduler:scheduler bot.worker.tasks` | 只能 1 個 | 先停止舊的，再啟動新的 | 預設即可 |
+| migration | `alembic upgrade head` | 每次部署執行一次 | 在更新三個服務之前 | — |
+
+- **bot 同一時間只能有一個**：如果滾動更新先啟動新版本、再停止舊版本，會有一段時間兩個 bot 同時連著 Discord，事件會被處理兩次（例如訊息被存兩次）。代價是更新時 bot 會中斷幾秒，API 與 Discord 上的按鈕暫時沒有回應。
+- **scheduler 也只能有一個**：有兩個的話，定時工作會被放進 queue 兩次。
+- **停止的等待時間**是部署平台送出 `SIGTERM` 之後，等多久才強制停止：
+  - worker 收到 `SIGTERM` 後不再接新工作，等目前的工作完成才結束。等待時間要比最長的工作（上傳 1 GB 的附件）還長，所以設成跟 `idle_timeout` 一樣的 30 分鐘。沒有工作在執行時，幾秒就會停止。等更久也沒有意義，因為超過 30 分鐘沒有 ack 的工作，本來就會被其他 worker 接手。
+  - 被強制停止時工作不會遺失，但要等 30 分鐘才會被接手重新執行。
+  - bot 關閉時，最多等 SSE 等連線 10 秒（`timeout_graceful_shutdown`），所以 30 秒就夠了。
+- **PID 1**：image 用 tini 當 PID 1，把 `SIGTERM` 轉給程式。PID 1 沒有自己處理的訊號會被忽略，而 scheduler 沒有處理 `SIGTERM`，沒有 tini 的話，就要等到被強制停止。換掉 `ENTRYPOINT` 時要注意這一點。
+- **migration**：每次部署先用同一個 image 執行一次 `alembic upgrade head`，再更新三個服務。部署期間新舊版本會同時執行一段時間（migration 時舊版本還在跑，worker 也可以先啟動新的），所以 migration 和工作的參數都要跟上一版相容：
+  - 新增欄位要允許 NULL，或是有預設值。
+  - 刪除欄位或改名要分兩次部署：先讓程式不再使用，下一次再刪除。
+- **健康檢查**：只有 bot 有 HTTP（`GET /health`）。image 裡沒有 curl，可以用 `python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"`。三個服務共用 image，所以健康檢查不寫在 `Dockerfile` 裡。
+- **網路**：image 預設 `API_HOST=0.0.0.0`。API 的 port（`API_PORT`，預設 8000）只讓自己的 reverse proxy 連進來，`FORWARDED_ALLOW_IPS` 設成 reverse proxy 的 IP（`docs/auth.md` 第 8 節）。worker、scheduler 不需要對外的 port。
+- **SQLite** 只適合開發或單一主機：三個服務要掛同一個 volume 在 `/app/data`，而且容器裡的使用者（uid 10001）要能寫入。正式環境使用 MySQL、MariaDB 或 PostgreSQL。
 
 ## 12. 加密
 

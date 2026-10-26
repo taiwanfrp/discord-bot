@@ -28,6 +28,7 @@ uv run pytest                        # 測試
 uv run pre-commit run --all-files    # 跑全部 hook（只會檢查 git 已追蹤的檔案）
 uv run alembic upgrade head          # 套用 migration
 uv run alembic revision --autogenerate -m "add ..."   # 修改 models 後產生 migration（產生後要檢查內容）
+docker build -t taiwanfrp-discord-bot .   # 建立 image（三個服務共用，部署方式見 docs/tickets.md 11.3）
 ```
 
 pre-commit：commit 時跑 ruff、mypy 與基本檢查，push 前跑 pytest。
@@ -49,6 +50,7 @@ tests/               # tests/api/：API 測試（helpers.py 有假的 bot、伺�
 docs/tickets.md      # 客服單系統設計
 docs/auth.md         # 身分驗證
 TODO.md
+Dockerfile           # bot、worker、scheduler 共用的 image；放進去的檔案由 .dockerignore 的白名單決定
 ```
 
 ## 程式慣例
@@ -62,10 +64,12 @@ TODO.md
 - 要讓使用者看到的錯誤，丟出 `bot.core.tree.UserFacingError("訊息")`；其餘未預期的錯誤由 `CommandTree.on_error` 統一記錄並回覆。
 - 使用 `logging.getLogger(__name__)`，不要用 `print`。
 - 設定一律來自環境變數或 `.env`，透過 `bot.core.config.get_settings()` 讀取，不要寫死在程式裡；`.env` 不可 commit，新增設定時同步更新 `Settings` 與 `.env.example`。
+- 新增執行時需要的檔案或資料夾（不在 `bot/`、`migrations/` 裡的）時，要加進 `.dockerignore` 的白名單，否則不會被放進 image。
 
 ## 資料庫規則（SQLite / MySQL、MariaDB / PostgreSQL 都要支援）
 
 - 使用 SQLAlchemy 2.0 async 與 Alembic；資料表結構的任何變更都必須寫 migration。
+- migration 要跟上一版的程式相容，因為部署時新舊版本會同時執行一段時間：新增欄位要允許 NULL 或有預設值；刪除欄位或改名分兩次部署（docs/tickets.md 11.3）。
 - 開發時使用 SQLite（`data/bot.db`）。
 - Discord ID（snowflake）一律用 `BigInteger`，model 裡寫 `Mapped[Snowflake]`（`bot.db.base`）。
 - `String` 一定要指定長度；長文字用 `Text`。
@@ -92,6 +96,7 @@ TODO.md
 
 - 資料庫是唯一的真實狀態：工作只傳 id，執行時再從資料庫讀取最新資料。
 - 每個工作都必須冪等（重複執行結果相同），因為部署時被中斷的工作會重新執行。
+- 修改工作的參數時要跟上一版相容：部署期間，舊版本的 worker 可能收到新版本放入的工作，反過來也一樣。
 - 附件一律使用串流處理，不可以把整個檔案讀進記憶體（上限 1 GB）。
 - 附件儲存只依賴 S3 API，不可以使用特定服務商（例如 R2）專屬的功能。
 - Redis 的 key 一律加上 `ticket-bot:` 前綴（與主要 API 約定的 `session:`、`ticket_code:` 除外）；不要用 db 編號區分資料，pub/sub 不分 db。

@@ -125,9 +125,11 @@
 
 ## 11. 部署
 
-- [ ] Dockerfile（bot、worker、scheduler 共用一個 image）
-- [ ] bot 服務設定成先停止舊的再啟動新的；scheduler 只執行一個
-- [ ] 停止的等待時間大於最長的工作
+- [x] Dockerfile（bot、worker、scheduler 共用一個 image）：tini 當 PID 1、非 root 使用者、`.dockerignore` 白名單
+- [x] bot 服務設定成先停止舊的再啟動新的；scheduler 只執行一個（寫在 `docs/tickets.md` 11.3，部署平台照著設定）
+- [x] 停止的等待時間大於最長的工作（worker 30 分鐘、bot 30 秒）
+- [x] 實際測試（本機 Docker）：migration（新的資料庫、已經是最新版本的資料庫）、三個服務啟動、`SIGTERM` 後正常停止、worker 等跑到一半的工作完成、強制停止時工作留在 pending、沒有 tini 時 scheduler 會忽略 `SIGTERM`
+- [ ] 在部署平台上設定並部署，順便做第 8 步用公開的 S3 與 bot 網址的測試
 
 ## 12. 之後再做
 

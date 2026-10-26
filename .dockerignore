@@ -1,0 +1,10 @@
+# 白名單：只把執行需要的檔案放進 image（.env、資料庫、.venv 不會被放進去）
+# 新增執行時需要的檔案或資料夾時，要加在這裡
+*
+!main.py
+!bot/
+!migrations/
+!alembic.ini
+!pyproject.toml
+!uv.lock
+**/__pycache__
