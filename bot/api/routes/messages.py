@@ -1,15 +1,15 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 from taskiq.exceptions import SendTaskError
 
 from bot.api.deps import DBDep, S3Dep, ViewerDep
-from bot.api.output import attachment_out, user_out
+from bot.api.output import message_page
 from bot.api.routes.tickets import ticket_errors, visible_ticket
-from bot.api.schemas import AttachmentOut, MessageIn, MessageOut, MessagePage, RevisionOut
-from bot.db.models import TicketAttachment, TicketMessage, TicketMessageRevision, TicketUser
+from bot.api.schemas import AttachmentOut, MessageIn, MessageOut, MessagePage
+from bot.db.models import TicketMessage
 from bot.tickets.messages import create_web_message
 from bot.worker.tasks import deliver_messages
 
@@ -31,14 +31,9 @@ async def list_messages(
     """訊息依照順序排列（舊的在前面）。
 
     沒有指定 before、after 時是最新的 limit 則；before 往前翻頁（用這一頁第一則的 id）；
-    after 取得之後的訊息，例如收到 SSE 的 message.created 時（message.updated、message.deleted
-    用 after=<id - 1>&limit=1 重新取得那一則）。
-
-    被刪除的訊息、編輯前的內容、編輯時移除的附件，只有這張單的客服、管理員看得到
-    （docs/tickets.md 8.1）。
+    after 取得之後的訊息，例如收到 SSE 的 message.created 時。
     """
     ticket = await visible_ticket(db, viewer, ticket_id)
-    staff = viewer.access.is_staff(ticket.category_id)
     query = select(TicketMessage).where(TicketMessage.ticket_id == ticket.id)
     if before is not None:
         query = query.where(TicketMessage.id < before)
@@ -48,48 +43,26 @@ async def list_messages(
     else:
         messages = list(await db.scalars(query.order_by(TicketMessage.id.desc()).limit(limit)))
         messages.reverse()
-
-    message_ids = [message.id for message in messages if staff or message.deleted_at is None]
-    attachment_query = select(TicketAttachment).where(TicketAttachment.message_id.in_(message_ids))
-    if not staff:
-        attachment_query = attachment_query.where(TicketAttachment.removed_at.is_(None))
-    attachments: dict[int, list[AttachmentOut]] = {}
-    for attachment in await db.scalars(attachment_query.order_by(TicketAttachment.id)):
-        assert attachment.message_id is not None
-        attachments.setdefault(attachment.message_id, []).append(
-            await attachment_out(s3, attachment)
-        )
-    revisions: dict[int, list[RevisionOut]] = {}
-    if staff:
-        for revision in await db.scalars(
-            select(TicketMessageRevision)
-            .where(
-                TicketMessageRevision.message_id.in_(
-                    [message.id for message in messages if message.edited_at is not None]
-                )
-            )
-            .order_by(TicketMessageRevision.id)
-        ):
-            revisions.setdefault(revision.message_id, []).append(
-                RevisionOut.model_validate(revision)
-            )
-    authors = await db.scalars(
-        select(TicketUser).where(
-            TicketUser.ticket_id == ticket.id,
-            TicketUser.user_id.in_({message.author_id for message in messages}),
-        )
+    return await message_page(
+        db, s3, ticket, messages, staff=viewer.access.is_staff(ticket.category_id)
     )
 
-    page = MessagePage(
-        messages=[MessageOut.model_validate(message) for message in messages],
-        users=[await user_out(s3, row) for row in authors],
+
+@router.get("/{ticket_id}/messages/{message_id}")
+async def get_message(
+    ticket_id: int, message_id: int, viewer: ViewerDep, db: DBDep, s3: S3Dep
+) -> MessagePage:
+    """單則訊息，例如收到 SSE 的 message.updated、message.deleted 時重新取得。
+
+    回應的格式跟列表一樣（messages 只有這一則），網頁可以用同一段程式合併。
+    """
+    ticket = await visible_ticket(db, viewer, ticket_id)
+    message = await db.get(TicketMessage, message_id)
+    if message is None or message.ticket_id != ticket.id:
+        raise HTTPException(404, "找不到這則訊息")
+    return await message_page(
+        db, s3, ticket, [message], staff=viewer.access.is_staff(ticket.category_id)
     )
-    for out in page.messages:
-        if out.deleted_at is not None and not staff:
-            out.content = ""
-        out.attachments = attachments.get(out.id, [])
-        out.revisions = revisions.get(out.id, [])
-    return page
 
 
 @router.post("/{ticket_id}/messages", status_code=201)

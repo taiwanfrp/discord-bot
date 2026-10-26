@@ -576,8 +576,9 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
   - BREACH 攻擊要回應裡同時有祕密和攻擊者能控制的內容。這裡的 cookie 在 header 裡，不會被壓縮；回應裡的 presigned URL，也是看得到這張單的人本來就拿得到的，所以沒有實際的風險。
 - 列表類的 endpoint（客服單、訊息）使用 cursor 分頁（`?before=<id>&limit=50`，`limit` 最多 100），不用 offset：訊息一直在增加，用 offset 會漏掉或重複。
   - `GET /tickets`：新的在前面，下一頁用這一頁最後一筆的 id 當作 `before`。篩選：`status`、`category_id`、`opener_id`、`claimed_by_id`、`claimed`（`false` 是還沒有人接手）、`q`（開單者的名稱，不分大小寫）。每一筆附上開單者與接手的人的快照。
-  - `GET /tickets/{id}/messages`：舊的在前面。沒有指定時是最新的 `limit` 則；`before` 往前翻頁（用這一頁第一則的 id）；`after` 取得之後的訊息（收到 SSE 的 `message.created` 時；收到 `message.updated`、`message.deleted` 時用 `?after=<message_id - 1>&limit=1` 重新取得那一則）。回應的 `users` 是這些訊息的作者的快照。
-    - 編輯過的訊息有 `edited_at`、被刪除的有 `deleted_at`。編輯前的每一版（`revisions`）、被刪除的訊息的內容與附件、編輯時移除的附件（`removed_at`），只有這張單的客服、管理員拿得到；其他人拿到的被刪除的訊息 `content` 是空的、沒有附件（8.1）。
+  - `GET /tickets/{id}/messages`：舊的在前面。沒有指定時是最新的 `limit` 則；`before` 往前翻頁（用這一頁第一則的 id）；`after` 取得之後的訊息（收到 SSE 的 `message.created` 時）。回應的 `users` 是這些訊息的作者的快照。
+    - 編輯過的訊息有 `edited_at`、被刪除的有 `deleted_at`。編輯前的每一版（`revisions`）、被刪除的訊息的內容與附件、編輯時移除的附件（`removed_at`），只有這張單的客服、管理員拿得到；其他人拿到的被刪除的訊息 `content` 是空的、沒有附件（8.1）。單則訊息的 API 也一樣。
+  - `GET /tickets/{id}/messages/{message_id}`：單則訊息，收到 `message.updated`、`message.deleted` 時重新取得那一則。回應的格式跟列表一樣（`messages` 只有這一則），網頁可以用同一段程式合併。
 - 回傳使用者資料時用快照（8.6），頭像依照 8.6 的順序決定。`GET /tickets/{id}` 回傳這張單所有人的快照，以及額外加入的成員。
 
 | 分類 | Endpoint | 權限 |
@@ -592,7 +593,7 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
 | 分類 | `GET`、`POST /categories`，`PATCH`、`DELETE /categories/{category_id}`（已經有客服單的分類不能刪除，回傳 `409`，只能停用） | 管理員（`GET` 登入就可以，但只看得到啟用中的分類） |
 | 面板 | `POST /panel/publish` | 管理員 |
 | 客服單 | `POST /tickets`（從網頁開單）、`GET /tickets`（篩選、分頁）、`GET /tickets/{id}` | 依照權限 |
-| 訊息 | `GET`、`POST /tickets/{id}/messages` | 依照權限 |
+| 訊息 | `GET`、`POST /tickets/{id}/messages`、`GET /tickets/{id}/messages/{message_id}`（單則） | 依照權限 |
 | 附件 | `POST /tickets/{id}/attachments`（取得上傳網址）、`POST /attachments/{attachment_id}/parts`（分塊上傳每一塊的網址）、`POST /attachments/{attachment_id}/complete`、`DELETE /attachments/{attachment_id}`（移除還沒送出的附件）、`GET /attachments/{attachment_id}`（附件的資料與新的 presigned URL） | 依照權限；上傳的操作只有上傳的人，還沒送出的附件也只有上傳的人看得到；編輯時移除的附件、被刪除的訊息的附件只有客服、管理員看得到 |
 | 分享連結 | `GET /a/{attachment_id}/{token}`（302 轉址到新的 presigned URL，見 8.4.1） | 不需要登入，用 token 驗證 |
 | 操作 | `POST /tickets/{id}/claim`、`/unclaim`、`/transfer`、`/close`、`/members`，`DELETE /tickets/{id}/members/{user_id}` | 依照權限 |

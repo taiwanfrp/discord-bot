@@ -231,7 +231,14 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
     def status(filename: str) -> Any:
         return env.client.get(f"/attachments/{attachments[filename].id}")
 
+    async def check_single(page: Any) -> None:
+        """單則訊息的 API 跟列表的內容一樣。"""
+        for message in page["messages"]:
+            response = await env.client.get(f"/tickets/{ticket_id}/messages/{message['id']}")
+            assert response.json() == {"messages": [message], "users": page["users"]}
+
     page = await messages(env, ticket_id)
+    await check_single(page)
     # 開單者只看到已編輯、已刪除的標記
     assert summary(page) == [("新的", ["kept.png"], []), ("", [], [])]
     assert page["messages"][0]["edited_at"] is not None
@@ -243,6 +250,7 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
     for user_id in (STAFF, ADMIN):
         await login_as(env, user_id)
         page = await messages(env, ticket_id)
+        await check_single(page)
         assert summary(page) == [
             ("新的", ["kept.png", "removed.png"], ["舊的"]),
             ("貼錯了", ["deleted.png"], []),
@@ -252,6 +260,20 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
         assert page["messages"][0]["attachments"][1]["removed_at"] is not None
         for filename in attachments:
             assert (await status(filename)).status_code == 200
+
+
+async def test_get_message_not_found(env: Env) -> None:
+    ticket_id, _ = await open_ticket(env)
+    others = await open_as(env, OTHER)
+    response = await env.post(f"/tickets/{others}/messages", {"content": "別張單"})
+    message_id = response.json()["id"]
+
+    await login_as(env, OPENER)
+    # 別張單的訊息、不存在的訊息
+    assert (await env.client.get(f"/tickets/{ticket_id}/messages/{message_id}")).status_code == 404
+    assert (await env.client.get(f"/tickets/{ticket_id}/messages/999")).status_code == 404
+    # 看不到的客服單
+    assert (await env.client.get(f"/tickets/{others}/messages/{message_id}")).status_code == 404
 
 
 async def test_get_attachment(env: Env) -> None:
