@@ -9,6 +9,7 @@ TaiwanFRP 的 Discord bot，只服務單一伺服器。主要功能是客服單�
 ## 開發流程
 
 - 程式碼必須通過 ruff、mypy（strict）、pytest。
+- 每個測試（包括 fixture 的收尾）最多 60 秒（pytest-timeout，設定在 `pyproject.toml`），卡住時會直接失敗並印出卡在哪裡。
 - 一個步驟完成就 commit 一次。commit 訊息用 Conventional Commits，**一句話**，例如 `feat: add ticket panel`。
 - 文件裡的圖使用 Mermaid。
 

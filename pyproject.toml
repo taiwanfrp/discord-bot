@@ -30,6 +30,7 @@ dev = [
     "pre-commit>=4.7.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-timeout>=2.4.0",
     "ruff>=0.17.2",
     "types-aiobotocore[s3]>=3.10.0",
 ]
@@ -54,6 +55,9 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+# 每個測試（包括 fixture 的收尾）最多幾秒，卡住時直接失敗並印出卡在哪裡，不會一直等。
+# 目前最慢的測試只要 1～2 秒
+timeout = 60
 
 [tool.alembic]
 script_location = "%(here)s/migrations"
