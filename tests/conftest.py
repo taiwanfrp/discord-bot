@@ -30,7 +30,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--db",
         choices=list(DATABASES),
         default="sqlite",
-        help="測試用的資料庫；sqlite 以外的要先 docker compose --profile db up -d --wait",
+        help=(
+            "測試用的資料庫；sqlite 以外的要先"
+            " docker compose -f compose.dev.yaml --profile db up -d --wait"
+        ),
     )
 
 

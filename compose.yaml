@@ -1,85 +1,94 @@
-# 本機開發用的服務：docker compose up -d
+# 正式環境，說明見 docs/tickets.md 11.3，環境變數見 .env.example
+x-env: &env
+  DISCORD_TOKEN: ${DISCORD_TOKEN:?}
+  GUILD_ID: ${GUILD_ID:?}
+  DATABASE_URL: postgresql+asyncpg://ticket_bot:${POSTGRES_PASSWORD:?}@postgres/ticket_bot
+  REDIS_URL: redis://redis:6379
+  SESSION_REDIS_URL: ${SESSION_REDIS_URL:?}
+  ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:?}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?}
+  S3_BUCKET: ${S3_BUCKET:?}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?}
+  WEB_TICKET_URL: ${WEB_TICKET_URL:?}
+  API_CORS_ORIGINS: ${API_CORS_ORIGINS:?}
+  FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:?}
+  # 空白時用程式的預設值
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_REGION: ${S3_REGION:-}
+  S3_PRESIGN_TTL: ${S3_PRESIGN_TTL:-}
+  AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-}
+  TICKET_SESSION_TTL: ${TICKET_SESSION_TTL:-}
+
+x-app: &app
+  image: ghcr.io/taiwanfrp/discord-bot:${IMAGE_TAG:-latest}
+  pull_policy: always
+  restart: unless-stopped
+  environment: *env
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+
 services:
-  redis:
-    image: redis:8-alpine
-    # appendonly：Redis 重啟後 queue 裡的工作不會遺失
-    command: redis-server --appendonly yes
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis-data:/data
-
-  # S3 相容儲存（MinIO 的社群分支）。管理介面：http://localhost:9001
-  silo:
-    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
-    command: server /data --console-address ":9001"
-    environment:
-      # 只用於本機開發；.env 的 S3_ACCESS_KEY_ID、S3_SECRET_ACCESS_KEY 也用這組
-      MINIO_ROOT_USER: ticket-bot
-      MINIO_ROOT_PASSWORD: ticket-bot-dev-password
-    ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
-    volumes:
-      - silo-data:/data
-
-  # 測試用的資料庫：docker compose --profile db up -d --wait，再用 uv run pytest --db mysql 等
-  # 資料放在記憶體裡（tmpfs），停止後就不見了
-  mysql:
-    image: mysql:8.4
-    profiles: [db]
-    # 故意把預設字元集設成 latin1（舊版的預設），確認程式不依賴資料庫的預設字元集
-    command: ["--character-set-server=latin1", "--collation-server=latin1_swedish_ci"]
-    environment:
-      MYSQL_DATABASE: ticket_bot_test
-      MYSQL_USER: ticket_bot
-      MYSQL_PASSWORD: ticket-bot-dev-password
-      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
-    ports:
-      - "127.0.0.1:3306:3306"
-    tmpfs:
-      - /var/lib/mysql
-    healthcheck:
-      # 初始化期間的暫時 server 不聽 TCP，連得上 127.0.0.1 才是真的啟動完成
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
-      interval: 2s
-      retries: 60
-
-  mariadb:
-    image: mariadb:11.8
-    profiles: [db]
-    # 故意把預設字元集設成 latin1（舊版的預設），確認程式不依賴資料庫的預設字元集
-    command: ["--character-set-server=latin1", "--collation-server=latin1_swedish_ci"]
-    environment:
-      MARIADB_DATABASE: ticket_bot_test
-      MARIADB_USER: ticket_bot
-      MARIADB_PASSWORD: ticket-bot-dev-password
-      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
-    ports:
-      - "127.0.0.1:3307:3306"
-    tmpfs:
-      - /var/lib/mysql
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 2s
-      retries: 60
-
   postgres:
     image: postgres:18-alpine
-    profiles: [db]
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: ticket_bot_test
+      POSTGRES_DB: ticket_bot
       POSTGRES_USER: ticket_bot
-      POSTGRES_PASSWORD: ticket-bot-dev-password
-    ports:
-      - "127.0.0.1:5432:5432"
-    tmpfs:
-      - /var/lib/postgresql
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ticket_bot", "-d", "ticket_bot_test"]
-      interval: 2s
-      retries: 60
+      # 初始化期間的暫時 server 不聽 TCP
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "ticket_bot", "-d", "ticket_bot"]
+      interval: 30s
+      start_period: 60s
+      start_interval: 2s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 30s
+      start_period: 60s
+      start_interval: 2s
+
+  migrate:
+    image: ghcr.io/taiwanfrp/discord-bot:${IMAGE_TAG:-latest}
+    pull_policy: always
+    command: ["alembic", "upgrade", "head"]
+    environment: *env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bot:
+    <<: *app
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      # 啟動時可能要等上一個 bot 的鎖（最多 30 秒）
+      start_period: 60s
+      start_interval: 2s
+
+  worker:
+    <<: *app
+    command: ["taskiq", "worker", "bot.worker.broker:broker", "bot.worker.tasks", "--workers", "1"]
+    stop_grace_period: 30m
+
+  scheduler:
+    <<: *app
+    command: ["taskiq", "scheduler", "bot.worker.scheduler:scheduler", "bot.worker.tasks"]
 
 volumes:
+  postgres-data:
   redis-data:
-  silo-data:

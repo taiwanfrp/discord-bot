@@ -38,7 +38,7 @@ def test_downgrade(tmp_path: Path) -> None:
 
 
 def test_mysql_charset(tmp_path: Path) -> None:
-    """測試用的 MySQL / MariaDB 預設字元集是 latin1（compose.yaml），資料表要自己指定 utf8mb4。"""
+    """測試用的 MySQL / MariaDB 預設字元集是 latin1（compose.dev.yaml），資料表要指定 utf8mb4。"""
     url = database.url
     if url is None or make_url(url).get_backend_name() not in ("mysql", "mariadb"):
         pytest.skip("只有 MySQL / MariaDB")

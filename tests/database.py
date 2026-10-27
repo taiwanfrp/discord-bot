@@ -1,6 +1,6 @@
 """測試用的資料庫（uv run pytest --db mysql 等，見 tests/conftest.py）。
 
-預設每個測試用一個新的 SQLite 檔案。選擇其他資料庫時用 compose.yaml 的 db profile，
+預設每個測試用一個新的 SQLite 檔案。選擇其他資料庫時用 compose.dev.yaml 的 db profile，
 每個測試開始前把資料表全部刪掉再重建（測試不能同時執行）。
 """
 
@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from bot.db.base import Base
 from bot.db.engine import create_engine
 
-# compose.yaml 的帳密
+# compose.dev.yaml 的帳密
 DATABASES = {
     "sqlite": None,
     "mysql": "mysql+aiomysql://ticket_bot:ticket-bot-dev-password@127.0.0.1:3306/ticket_bot_test?charset=utf8mb4",

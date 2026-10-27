@@ -475,11 +475,11 @@ flowchart LR
 - **migration**：每次部署先用同一個 image 執行一次 `alembic upgrade head`，再更新三個服務。部署期間新舊版本會同時執行一段時間（migration 時舊版本還在跑，worker 也可以先啟動新的），所以 migration 和工作的參數都要跟上一版相容：
   - 新增欄位要允許 NULL，或是有預設值。
   - 刪除欄位或改名要分兩次部署：先讓程式不再使用，下一次再刪除。
-- **`compose.prod.yaml`**：正式環境用的 compose，照上面的表格設定好四個服務，PostgreSQL、Redis 也一起啟動。用 `docker compose -f compose.prod.yaml up -d` 部署或更新，也可以交給支援 compose 的部署平台。
+- **`compose.yaml`**：正式環境用的 compose（本機開發用的是 `compose.dev.yaml`），照上面的表格設定好四個服務，PostgreSQL、Redis 也一起啟動。用 `docker compose up -d` 部署或更新，也可以交給支援 compose 的部署平台。
   - PostgreSQL 通過健康檢查後才跑 `migrate`；`migrate` 跑完（`service_completed_successfully`）、Redis 通過健康檢查，才啟動或更新其他三個。`migrate` 每次 `up` 都會再跑一次，已經是最新版本時什麼都不做。
   - `DATABASE_URL`、`REDIS_URL` 固定連到裡面的 PostgreSQL、Redis，只要設定 `POSTGRES_PASSWORD`。密碼會放進網址，用 `openssl rand -hex 32` 這種只有英數字的，才不用跳脫。
   - PostgreSQL、Redis 沒有對外的 port。資料存在 `postgres-data`、`redis-data` 兩個 volume，`docker compose down` 會保留，加上 `-v` 才會刪除。Redis 開啟 `appendonly`，重啟後 queue 裡的工作不會遺失。
-  - 備份：`docker compose -f compose.prod.yaml exec -T postgres pg_dump -U ticket_bot ticket_bot > backup.sql`，加密金鑰（`ENCRYPTION_KEYS`）要另外備份。PostgreSQL 的大版本（image 的 `18`）不能直接改，要先 dump 再匯入新版本。
+  - 備份：`docker compose exec -T postgres pg_dump -U ticket_bot ticket_bot > backup.sql`，加密金鑰（`ENCRYPTION_KEYS`）要另外備份。PostgreSQL 的大版本（image 的 `18`）不能直接改，要先 dump 再匯入新版本。
   - 環境變數四個服務共用同一組，從 shell 或同一個資料夾的 `.env` 讀取。必填的用 `${VAR:?}` 標示，沒有填就不能啟動；選填的用 `${VAR:-}`，空白時用程式的預設值（`Settings` 把空白的環境變數當作沒有設定）。
   - `IMAGE_TAG` 預設是 `latest`，退回舊版時改成那一版的 `sha-` tag。
   - `docker compose up -d` 更新時，會先停止舊的容器再啟動新的，符合 bot、scheduler 的要求。worker 也一樣，要等目前的工作完成（最多 30 分鐘）才會換成新版本。
@@ -587,7 +587,7 @@ ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
 
 ### 13.1 各資料庫的差異
 
-SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能通過（`uv run pytest --db mysql` 等，資料庫用 `compose.yaml` 的 `db` profile）。已經處理的差異：
+SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能通過（`uv run pytest --db mysql` 等，資料庫用 `compose.dev.yaml` 的 `db` profile）。已經處理的差異：
 
 - **交易隔離等級**：MySQL / MariaDB 的連線改用 `READ COMMITTED`，跟 PostgreSQL 的預設一樣。程式裡很多地方用「帶條件的 UPDATE，看更新了幾筆」來處理同時操作（評分、閒置提醒、附件），要依照最新 commit 的資料判斷。預設的 `REPEATABLE READ` 下，MariaDB 11.8 起（`innodb_snapshot_isolation`）更新一筆讀過之後被其他交易改過的資料，會直接失敗（錯誤 1020），而不是更新 0 筆。
 - **時間**：MySQL / MariaDB 的 `DATETIME` 預設只到秒，所以指定到微秒（`fsp=6`）。

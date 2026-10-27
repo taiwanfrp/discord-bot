@@ -18,7 +18,7 @@ TaiwanFRP 的 Discord bot，只服務單一伺服器。主要功能是客服單�
 
 ```bash
 uv sync                              # 安裝依賴
-docker compose up -d                 # 本機開發用的 Redis、Silo（S3）
+docker compose -f compose.dev.yaml up -d   # 本機開發用的 Redis、Silo（S3）
 uv run python -m bot.storage.create_bucket   # 建立本機開發用的 bucket、設定 CORS（第一次啟動 Silo 後）
 uv run main.py                       # 啟動 bot
 uv run taskiq worker bot.worker.broker:broker bot.worker.tasks --workers 1   # 啟動 worker
@@ -27,7 +27,7 @@ uv run ruff check --fix              # lint（含 import 排序）
 uv run ruff format                   # 格式化
 uv run mypy                          # 型別檢查（strict）
 uv run pytest                        # 測試（每個測試一個新的 SQLite 檔案）
-docker compose --profile db up -d --wait   # 測試用的 MySQL、MariaDB、PostgreSQL（資料不保留）
+docker compose -f compose.dev.yaml --profile db up -d --wait   # 測試用的 MySQL、MariaDB、PostgreSQL（資料不保留）
 uv run pytest --db mysql             # 換成其他資料庫測試：mysql、mariadb、postgres
 uv run pre-commit run --all-files    # 跑全部 hook（只會檢查 git 已追蹤的檔案）
 uv run alembic upgrade head          # 套用 migration
@@ -55,8 +55,8 @@ docs/tickets.md      # 客服單系統設計
 docs/auth.md         # 身分驗證
 TODO.md
 Dockerfile           # bot、worker、scheduler 共用的 image；放進去的檔案由 .dockerignore 的白名單決定
-compose.yaml         # 本機開發用的 Redis、Silo，以及測試用的資料庫（db profile）
-compose.prod.yaml    # 正式環境：PostgreSQL、Redis，以及 migrate 跑完才啟動的 bot、worker、scheduler（docs/tickets.md 11.3）
+compose.yaml         # 正式環境：PostgreSQL、Redis，以及 migrate 跑完才啟動的 bot、worker、scheduler（docs/tickets.md 11.3）
+compose.dev.yaml     # 本機開發用的 Redis、Silo，以及測試用的資料庫（db profile）
 .github/workflows/ci.yml   # CI：pre-commit、四種資料庫的測試，通過後建立 image（build.yml）
 .github/workflows/build.yml   # ci.yml 呼叫：在各自的 runner 建立 amd64、arm64 的 image、smoke test，main 推送到 GHCR（sha- tag 與 latest）
 .github/smoke-test.sh     # image 的 smoke test（兩個 workflow 共用）

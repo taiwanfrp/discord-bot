@@ -49,7 +49,7 @@ jobs:
       - run: uv sync --locked
       - name: Start ${{ matrix.db }}
         if: matrix.db != 'sqlite'
-        run: docker compose --profile db up -d --wait ${{ matrix.db }}
+        run: docker compose -f compose.dev.yaml --profile db up -d --wait ${{ matrix.db }}
       - run: uv run pytest --db ${{ matrix.db }}
 
   docker:

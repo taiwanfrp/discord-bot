@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # 空白的環境變數當作沒有設定，使用預設值（compose.prod.yaml 的選填變數沒填時是空白）
+    # 空白的環境變數當作沒有設定，使用預設值（compose.yaml 的選填變數沒填時是空白）
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     discord_token: SecretStr
