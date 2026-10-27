@@ -13,12 +13,12 @@ x-env: &env
   WEB_TICKET_URL: ${WEB_TICKET_URL:?}
   API_CORS_ORIGINS: ${API_CORS_ORIGINS:?}
   FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:?}
-  # 沒有設定時用程式的預設值
-  S3_ENDPOINT:
-  S3_REGION:
-  S3_PRESIGN_TTL:
-  AUTH_COOKIE_NAME:
-  TICKET_SESSION_TTL:
+  # 空白時用程式的預設值
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_REGION: ${S3_REGION:-}
+  S3_PRESIGN_TTL: ${S3_PRESIGN_TTL:-}
+  AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-}
+  TICKET_SESSION_TTL: ${TICKET_SESSION_TTL:-}
 
 x-app: &app
   image: ghcr.io/taiwanfrp/discord-bot:${IMAGE_TAG:-latest}
@@ -71,8 +71,6 @@ services:
 
   bot:
     <<: *app
-    ports:
-      - "127.0.0.1:8000:8000"
     stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]

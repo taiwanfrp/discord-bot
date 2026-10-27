@@ -141,7 +141,7 @@
 - [x] 在 GitHub 上確認 CI 通過後推送成功（`sha-` tag 與 `latest`）
 - [x] arm64 的 image：在 arm64 的 runner 上建立、smoke test，跟 amd64 合併成同一個 tag
 - [ ] 在 GitHub 上確認兩種架構都推送成功，arm64 的機器拉得到、跑得起來
-- [x] `compose.prod.yaml`：一起啟動 PostgreSQL、Redis（volume 保留資料、appendonly）、migrate 跑完才啟動其他服務、共用的環境變數（必填的沒填不能啟動）、健康檢查、停止的等待時間、`IMAGE_TAG`、bot 的 port 只綁在 127.0.0.1
+- [x] `compose.prod.yaml`：一起啟動 PostgreSQL、Redis（volume 保留資料、appendonly）、migrate 跑完才啟動其他服務、共用的環境變數（必填的沒填不能啟動）、健康檢查、停止的等待時間、`IMAGE_TAG`、bot 沒有對外的 port
 - [ ] 在部署平台上設定並部署，順便做第 8 步用公開的 S3 與 bot 網址的測試
 
 ## 12. 之後再做

@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # 空白的環境變數當作沒有設定，使用預設值（compose.prod.yaml 的選填變數沒填時是空白）
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     discord_token: SecretStr
     guild_id: int
@@ -35,12 +36,6 @@ class Settings(BaseSettings):
     session_redis_url: str
     auth_cookie_name: str = "__Host-ticket_session"
     ticket_session_ttl: int = 3 * 24 * 60 * 60
-
-    @field_validator("s3_endpoint", mode="before")
-    @classmethod
-    def _empty_is_none(cls, value: object) -> object:
-        # S3_ENDPOINT= 留空表示使用 AWS
-        return None if value == "" else value
 
     @field_validator("public_base_url")
     @classmethod
