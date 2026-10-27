@@ -13,6 +13,9 @@ x-env: &env
   WEB_TICKET_URL: ${WEB_TICKET_URL:?}
   API_CORS_ORIGINS: ${API_CORS_ORIGINS:?}
   FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:?}
+  # 部署平台可能會帶入 .env.example 的值，這裡固定
+  API_HOST: 0.0.0.0
+  API_PORT: "8000"
   # 空白時用程式的預設值
   S3_ENDPOINT: ${S3_ENDPOINT:-}
   S3_REGION: ${S3_REGION:-}
