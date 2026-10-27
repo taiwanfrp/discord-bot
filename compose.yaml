@@ -67,6 +67,8 @@ services:
     image: ghcr.io/taiwanfrp/discord-bot:${IMAGE_TAG:-latest}
     pull_policy: always
     command: ["alembic", "upgrade", "head"]
+    # 部署平台可能會幫沒有設定的服務加上 unless-stopped
+    restart: "no"
     environment: *env
     depends_on:
       postgres:
