@@ -612,7 +612,7 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
 |---|---|---|
 | 健康檢查 | `GET /health` | 不需要 |
 | 登入 | `POST /auth/exchange`（用授權碼換 cookie）、`POST /auth/logout` | 見 `docs/auth.md` |
-| 身分 | `GET /me`：Discord ID，以及是不是管理員、負責哪些分類 | 登入 |
+| 身分 | `GET /me`：Discord ID、伺服器 ID，以及是不是管理員、負責哪些分類 | 登入 |
 | Discord 資料 | `GET /guild/channels`、`GET /guild/roles` | 管理員 |
 | 身份組 | `POST /guild/roles`（在 Discord 建立）、`PATCH`、`DELETE /guild/roles/{role_id}` | 管理員 |
 | 權限身份組 | `GET`、`PUT /permission-roles`（整份取代：`admin_role_ids`、每個分類的 `role_ids`） | 管理員 |

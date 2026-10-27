@@ -52,7 +52,8 @@
 - [x] `GET /health`、`GET /me`
 - [x] gzip 壓縮回應（SSE 不壓縮）
 - [x] `GET /guild/channels`、`GET /guild/roles`
-- [ ] 主要 API 依照 `docs/auth.md` 第 5 節實作：`__Host-session` cookie、session 的格式、`POST /auth/ticket-code`（不在這個 repo）
+- [x] 主要 API 依照 `docs/auth.md` 第 5 節實作：session 的 key 改成 token 的雜湊、`POST /api/v1/auth/ticket-code`；bot 讀取主要 API 的 session 格式（JSON、帳號狀態）
+- [x] `GET /me` 加上 `guild_id`（網頁組出客服單頻道的網址）；客服單列表加上 `last_message_at`
 - [ ] session store 的專用 ACL 帳號（只能讀取 session、讀取並刪除授權碼）
 
 ## 4. 設定 API
@@ -142,7 +143,15 @@
 - [x] arm64 的 image：在 arm64 的 runner 上建立、smoke test，跟 amd64 合併成同一個 tag
 - [ ] 在 GitHub 上確認兩種架構都推送成功，arm64 的機器拉得到、跑得起來
 - [x] `compose.yaml`（正式環境；開發用的改名為 `compose.dev.yaml`）：一起啟動 PostgreSQL、Redis（volume 保留資料、appendonly）、migrate 跑完才啟動其他服務、共用的環境變數（必填的沒填不能啟動）、健康檢查、停止的等待時間、`IMAGE_TAG`、bot 沒有對外的 port
-- [ ] 在部署平台上設定並部署，順便做第 8 步用公開的 S3 與 bot 網址的測試
+- [x] 在部署平台上設定並部署
+- [ ] 第 8 步用公開的 S3 與 bot 網址的測試
+
+## 11.1 網頁（前端 repo）
+
+- [x] 客服單的 API 客戶端：收到 `401` 時向主要 API 取得授權碼、交換 cookie 後重送；SSE 連線失敗時用 `GET /me` 判斷要不要重新交換
+- [x] 客服單列表、開單、對話頁（SSE 即時更新、附件上傳與顯示、接手、關單、評分）
+- [x] 管理頁面：分類、身份組的用途、設定、發佈面板
+- [ ] 實際測試：從網頁登入、開單、對話、上傳附件、關單與評分，以及管理頁面
 
 ## 12. 之後再做
 

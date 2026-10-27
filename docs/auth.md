@@ -1,6 +1,6 @@
 # 身分驗證
 
-> 狀態：設計已定案。第 5 節是主要 API 與 bot 之間的約定，主要 API 依照這份文件實作。
+> 狀態：已實作。第 5 節是主要 API 與 bot 之間的約定。
 
 ## 1. 背景
 
@@ -30,14 +30,14 @@ sequenceDiagram
     participant B as bot
     participant R as bot 的 Redis
 
-    F->>A: POST /auth/ticket-code（帶主要 API 的 cookie）
-    A->>S: SET ticket_code:{code} {session 的雜湊} EX 30
+    F->>A: POST /api/v1/auth/ticket-code（帶主要 API 的 cookie）
+    A->>S: SET auth:ticket_code:{code} {session 的雜湊} EX 30
     A-->>F: {"code": "{code}"}
     F->>B: POST /auth/exchange {"code": "{code}"}
-    B->>S: GETDEL ticket_code:{code}
+    B->>S: GETDEL auth:ticket_code:{code}
     S-->>B: session 的雜湊（只能取出一次）
-    B->>S: TTL session:{雜湊}
-    S-->>B: 剩餘秒數（不存在就回傳 401）
+    B->>S: TTL、GET auth:session:{雜湊}
+    S-->>B: 剩餘秒數、session（不存在或帳號不能使用就回傳 401）
     B->>R: HSET ticket-bot:ticket_session:{ticket session 的雜湊} api_session_hash … created_at …
     B-->>F: Set-Cookie（只屬於 bot 的網域）＋ 使用者資料（同 GET /me）
 ```
@@ -56,8 +56,8 @@ sequenceDiagram
     alt 查不到
         B-->>Br: 401
     end
-    B->>S: HGET session:{api_session_hash} discord_id
-    alt 查不到
+    B->>S: GET auth:session:{api_session_hash}
+    alt 查不到，或帳號不能使用
         B-->>Br: 401
     end
     B->>B: 取得名稱、頭像、身份組（成員快取，不在伺服器裡就用 REST API）
@@ -125,78 +125,83 @@ bot 產生**新的**隨機字串，連結到主要 API 的 session，而不是�
   EXPIRE ticket-bot:ticket_session:<sha256(ticket session) 的 hex> <秒數>
   ```
 
-  key 用 ticket session 的 **SHA-256 雜湊**，跟主要 API 的 `session:` 一樣，不存原始的值：bot 的 Redis 外洩時，也拿不到能用的 cookie。
+  key 用 ticket session 的 **SHA-256 雜湊**，跟主要 API 的 `auth:session:` 一樣，不存原始的值：bot 的 Redis 外洩時，也拿不到能用的 cookie。
 
   不能把兩個值都放進 key（例如 `ticket_session:<ticket session>:<主要 API 的 session>`）：bot 收到請求時手上只有 ticket session，要用完整的 key 才能直接查詢。如果 key 裡還有主要 API 的 session，就只能用 `SCAN` 逐一比對所有 key，資料越多越慢。key 是「用來查詢的東西」，value 才是「查到的資料」。
 - 用 hash 而不是單純的字串，是為了之後可以再加欄位（例如建立時的 IP）。
-- **過期時間：3 天，與主要 API 的 cookie 相同**，而且**不超過主要 API session 的剩餘時間**（交換時用 `TTL` 取得；`TTL` 回傳 `-2` 表示 session 不存在，回傳 `401`；回傳 `-1` 表示沒有設定過期，就用 3 天）。使用期間不延長；過期之後，前端收到 `401` 會自動重新交換，使用者不會感覺到。
+- **過期時間：3 天**（`TICKET_SESSION_TTL`），而且**不超過主要 API session 的剩餘時間**（交換時用 `TTL` 取得；`TTL` 回傳 `-2` 表示 session 不存在，回傳 `401`；回傳 `-1` 表示沒有設定過期，就用 3 天）。使用期間不延長；過期之後，前端收到 `401` 會自動重新交換，使用者不會感覺到。主要 API 的 session 每次使用都會延長（5.2），重新交換時剩餘時間又是完整的。
 - 這是 bot 內部的資料，不屬於與主要 API 的約定，所以跟其他 bot 的 key 一樣使用 `ticket-bot:` 前綴。
 
 ### 4.5 session store 的權限
 
 bot 使用 Redis ACL 的專用帳號，只能：
 
-- **讀取**主要 API 的 session（`session:*`）。
-- **讀取並刪除**授權碼（`ticket_code:*`）。
+- **讀取**主要 API 的 session（`auth:session:*`）。session 裡還有 email 等資料，bot 只使用 `discord_id` 與帳號狀態，不記錄其他欄位。
+- **讀取並刪除**授權碼（`auth:ticket_code:*`）。
 
 ACL 範例：
 
 ```
-ACL SETUSER ticket-bot on >密碼 resetkeys ~session:* ~ticket_code:* resetchannels -@all +ping +hget +ttl +getdel
+ACL SETUSER ticket-bot on >密碼 resetkeys ~auth:session:* ~auth:ticket_code:* resetchannels -@all +ping +get +ttl +getdel
 ```
+
+`SESSION_REDIS_URL` 要跟主要 API 的 `REDIS_URL` 使用同一個 db。不是 db 0 的話（網址結尾的 `/數字`），連線時會先切換 db，ACL 要再加上 `+select`。
 
 不能讀寫其他任何資料。與 session store 之間的連線要走私人網路或 TLS。多主架構的複製是非同步的，登出後可能有極短的延遲（通常是毫秒等級），可以接受。
 
 ## 5. 與主要 API 的約定
 
-主要 API 依照這一節實作。之後任何一方要修改，都必須先通知另一方。
+主要 API 已經依照這一節實作。之後任何一方要修改，都必須先通知另一方。key 使用主要 API 的 `auth:` 前綴。
 
 ### 5.1 主要 API 的 session cookie
 
 ```
-Set-Cookie: __Host-session=<session>; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=259200
+Set-Cookie: auth=<session>; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800
 ```
 
-- `<session>`：32 bytes 的隨機資料，例如 `secrets.token_urlsafe(32)`。
-- 有效期限 3 天（259200 秒）。
+- `<session>`：32 bytes 的隨機資料（`secrets.token_urlsafe(32)`）。
+- cookie 的名稱與期限是主要 API 的設定（`COOKIE_AUTH_NAME`、`COOKIE_AUTH_MAX_AGE`，預設 7 天），bot 不依賴它們。
 
 ### 5.2 session store 裡的 session
 
 ```
-key：   session:<sha256(session) 的 hex>
-value： Redis hash
-          discord_id   Discord ID（字串）
-          created_at   ISO 8601，UTC
-過期：  Redis TTL（EXPIRE 259200）
+key：   auth:session:<sha256(session) 的 hex>
+value： JSON 字串
+          discord_id                Discord ID（字串）
+          internal_account_status   active、suspended、banned、deleted
+          ……                        主要 API 自己使用的其他欄位
+過期：  Redis TTL，每次使用都延長（預設 7 天）
 ```
 
 - key 用 session 的 **SHA-256 雜湊**，不存原始的 session。這樣即使 session store 外洩，也拿不到能用的 session。
 - 登出：直接刪除這個 key。
-- 主要 API 之後要在 hash 裡加欄位沒有問題，bot 只會讀取 `discord_id`。
+- 帳號狀態改變時（例如封鎖），主要 API 會更新這個使用者所有 session 的 `internal_account_status`。bot 接受 `active` 與 `suspended`（停權中的帳號也可以開客服單，例如申請啟用帳號），其他狀態一律當作沒有登入。
+- 主要 API 之後要在 JSON 裡加欄位沒有問題，bot 只會讀取 `discord_id` 與 `internal_account_status`。
 
 ### 5.3 產生授權碼
 
 ```
-POST /auth/ticket-code
-Cookie: __Host-session=<session>
+POST /api/v1/auth/ticket-code
+Cookie: auth=<session>
 
 200 OK
 { "code": "<code>" }
 
-401 Unauthorized   ← 沒有登入或 session 已過期
+401 Unauthorized   ← 沒有登入、session 已過期，或帳號不能使用
+403 Forbidden      ← Origin 不在白名單內
 ```
 
-主要 API 要做的事：
+主要 API 做的事：
 
-1. 驗證 session cookie。
+1. 驗證 session cookie（不接受 API Key）。帳號狀態的規則跟 5.2 一樣。
 2. 檢查 `Origin` header 在白名單內（只允許前端）。
 3. 產生 32 bytes 的隨機授權碼，寫入：
 
    ```
-   SET ticket_code:<code> <sha256(session) 的 hex> EX 30
+   SET auth:ticket_code:<code> <sha256(session) 的 hex> EX 30
    ```
 
-4. 回應授權碼。CORS 要允許前端的 origin，並開啟 credentials。
+4. 回應授權碼。CORS 允許前端的 origin，並開啟 credentials。
 
 ### 5.4 Discord ID 的格式
 

@@ -25,6 +25,8 @@ class MeOut(BaseModel):
     nickname: str | None
     avatar_url: str
     in_guild: bool
+    # 組出客服單頻道的網址（https://discord.com/channels/{guild_id}/{channel_id}）
+    guild_id: Snowflake
     is_admin: bool
     # 有分類身份組的分類（管理員可以存取所有分類）
     category_ids: list[int]
@@ -200,6 +202,8 @@ class TicketOut(BaseModel):
     claimed_by_id: Snowflake | None
     subject: str
     created_at: datetime
+    # 最後一則訊息的時間（沒有訊息時是開單的時間）
+    last_message_at: datetime
     closed_at: datetime | None
     # null 表示系統自動關閉（關閉之後才有意義）
     closed_by_id: Snowflake | None
@@ -240,7 +244,6 @@ class MemberOut(BaseModel):
 class TicketDetailOut(TicketOut):
     content: str
     claimed_at: datetime | None
-    last_message_at: datetime
     # 送出閒置提醒的時間，有新訊息時清除（docs/tickets.md 第 9 節）
     inactivity_reminded_at: datetime | None
     close_reason: str | None

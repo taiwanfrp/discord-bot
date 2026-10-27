@@ -11,6 +11,8 @@ from bot.api.deps import (
     SessionRedisDep,
     Viewer,
     ViewerDep,
+    api_session_key,
+    read_api_session,
     resolve_viewer,
     ticket_session_key,
 )
@@ -29,6 +31,7 @@ def me_out(viewer: Viewer) -> MeOut:
         nickname=viewer.member.nick if viewer.member else None,
         avatar_url=viewer.user.display_avatar.url,
         in_guild=viewer.member is not None,
+        guild_id=get_settings().guild_id,
         is_admin=viewer.access.is_admin,
         category_ids=sorted(viewer.access.category_ids),
     )
@@ -49,15 +52,14 @@ async def exchange(
     settings = get_settings()
     try:
         # 授權碼只能使用一次
-        api_session_hash = await session_redis.getdel(f"ticket_code:{body.code}")
+        api_session_hash = await session_redis.getdel(f"auth:ticket_code:{body.code}")
         # 用了 decode_responses，查得到時一定是 str
         if not isinstance(api_session_hash, str):
             raise HTTPException(401, "Invalid code")
-        api_session_key = f"session:{api_session_hash}"
-        remaining = await session_redis.ttl(api_session_key)
-        discord_id = await session_redis.hget(api_session_key, "discord_id")
+        remaining = await session_redis.ttl(api_session_key(api_session_hash))
+        discord_id = await read_api_session(session_redis, api_session_hash)
         # TTL -2：session 不存在
-        if remaining == -2 or not isinstance(discord_id, str):
+        if remaining == -2 or discord_id is None:
             raise HTTPException(401, "Session expired")
         # TTL -1：沒有設定過期；ticket session 不超過主要 API session 的剩餘時間
         ttl = settings.ticket_session_ttl

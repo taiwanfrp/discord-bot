@@ -1,4 +1,5 @@
 import hashlib
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -191,12 +192,19 @@ class Env:
         self.s3 = FakeS3()
         self.redis = FakeAsyncRedis(decode_responses=True)
 
-    async def login_main_api(self, ttl: int = 100, user_id: int = USER_ID) -> str:
-        """模擬主要 API：建立 session 與授權碼。"""
+    async def login_main_api(
+        self, ttl: int = 100, user_id: int = USER_ID, status: str = "active"
+    ) -> str:
+        """模擬主要 API：建立 session 與授權碼（docs/auth.md 5.2、5.3）。"""
         session_hash = hashlib.sha256(f"main-session-{user_id}".encode()).hexdigest()
-        await self.sessions.hset(f"session:{session_hash}", mapping={"discord_id": str(user_id)})
-        await self.sessions.expire(f"session:{session_hash}", ttl)
-        await self.sessions.set("ticket_code:code", session_hash, ex=30)
+        session = {
+            "internal_user_id": "user-id",
+            "internal_account_status": status,
+            "discord_id": str(user_id),
+            "username": "user",
+        }
+        await self.sessions.set(f"auth:session:{session_hash}", json.dumps(session), ex=ttl)
+        await self.sessions.set("auth:ticket_code:code", session_hash, ex=30)
         return session_hash
 
     async def exchange(self) -> Response:

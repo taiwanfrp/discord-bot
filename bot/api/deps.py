@@ -1,4 +1,5 @@
 import hashlib
+import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -73,6 +74,37 @@ def ticket_session_key(token: str) -> str:
     return f"ticket-bot:ticket_session:{hashlib.sha256(token.encode()).hexdigest()}"
 
 
+# 主要 API 的帳號狀態：停權中的帳號也可以開客服單（例如申請啟用帳號），封鎖、刪除的不行
+USABLE_ACCOUNT_STATUSES = frozenset({"active", "suspended"})
+
+
+def api_session_key(api_session_hash: str) -> str:
+    return f"auth:session:{api_session_hash}"
+
+
+async def read_api_session(session_redis: Redis, api_session_hash: str) -> str | None:
+    """主要 API 的 session 的 Discord ID（docs/auth.md 5.2）。
+
+    session 不存在、帳號不能使用、格式不對時是 None。
+    """
+    raw = await session_redis.get(api_session_key(api_session_hash))
+    # 用了 decode_responses，查得到時一定是 str
+    if not isinstance(raw, str):
+        return None
+    try:
+        session = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(session, dict):
+        return None
+    discord_id = session.get("discord_id")
+    if session.get("internal_account_status") not in USABLE_ACCOUNT_STATUSES:
+        return None
+    if not isinstance(discord_id, str) or not discord_id.isdigit():
+        return None
+    return discord_id
+
+
 async def authenticate(request: Request, redis: RedisDep, session_redis: SessionRedisDep) -> int:
     """ticket session → 主要 API 的 session → Discord ID（docs/auth.md 3.2）。"""
     token = request.cookies.get(get_settings().auth_cookie_name)
@@ -83,11 +115,11 @@ async def authenticate(request: Request, redis: RedisDep, session_redis: Session
         # 用了 decode_responses，查得到時一定是 str
         if not isinstance(api_session_hash, str):
             raise HTTPException(401, "Session expired")
-        discord_id = await session_redis.hget(f"session:{api_session_hash}", "discord_id")
+        discord_id = await read_api_session(session_redis, api_session_hash)
     except RedisError as error:
         # 無法確認 session 時不可以放行
         raise HTTPException(503, "Session store unavailable") from error
-    if not isinstance(discord_id, str):
+    if discord_id is None:
         raise HTTPException(401, "Session expired")
     return int(discord_id)
 

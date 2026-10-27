@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from redis.exceptions import ConnectionError
 
@@ -13,6 +15,7 @@ async def test_exchange_sets_cookie(env: Env) -> None:
     assert response.status_code == 200
     assert response.json()["id"] == str(USER_ID)
     assert response.json()["in_guild"] is False
+    assert response.json()["guild_id"] == "1"
     cookie = response.headers["set-cookie"]
     assert cookie.startswith("__Host-ticket_session=")
     for attribute in ("HttpOnly", "Max-Age=100", "Path=/", "SameSite=lax", "Secure"):
@@ -44,8 +47,36 @@ async def test_me_follows_main_session(env: Env) -> None:
     assert (await env.client.get("/me")).status_code == 200
 
     # 主要 API 登出（刪除 session）後立刻失效
-    await env.sessions.delete(f"session:{session_hash}")
+    await env.sessions.delete(f"auth:session:{session_hash}")
     assert (await env.client.get("/me")).status_code == 401
+
+
+@pytest.mark.parametrize(("status", "allowed"), [("suspended", True), ("banned", False)])
+async def test_account_status(env: Env, status: str, allowed: bool) -> None:
+    """停權中的帳號可以使用客服單，封鎖的不行。"""
+    await env.login_main_api(status=status)
+    assert ((await env.exchange()).status_code == 200) is allowed
+
+
+async def test_me_checks_account_status(env: Env) -> None:
+    session_hash = await env.login_main_api()
+    await env.exchange()
+    assert (await env.client.get("/me")).status_code == 200
+
+    # 主要 API 封鎖帳號時會更新所有 session 的狀態
+    key = f"auth:session:{session_hash}"
+    raw = await env.sessions.get(key)
+    assert raw is not None
+    session = json.loads(raw)
+    session["internal_account_status"] = "banned"
+    await env.sessions.set(key, json.dumps(session), keepttl=True)
+    assert (await env.client.get("/me")).status_code == 401
+
+
+async def test_invalid_session_data(env: Env) -> None:
+    session_hash = await env.login_main_api()
+    await env.sessions.set(f"auth:session:{session_hash}", "not json")
+    assert (await env.exchange()).status_code == 401
 
 
 async def test_logout(env: Env) -> None:
@@ -61,7 +92,7 @@ async def test_session_store_down_returns_503(env: Env, monkeypatch: pytest.Monk
     async def broken(*args: object) -> None:
         raise ConnectionError
 
-    monkeypatch.setattr(env.sessions, "hget", broken)
+    monkeypatch.setattr(env.sessions, "get", broken)
     assert (await env.client.get("/me")).status_code == 503
 
 
