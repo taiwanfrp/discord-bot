@@ -1,4 +1,4 @@
-"""附件的分享連結、附件與頭像的下載網址（docs/tickets.md 8.4、8.4.1、8.6）。"""
+"""附件的分享連結，附件、頭像、表情與貼圖的下載網址（docs/tickets.md 8.4、8.4.1、8.6、8.7）。"""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ import secrets
 from typing import TYPE_CHECKING
 
 from bot.core.config import get_settings
-from bot.db.models import AttachmentStatus, TicketAttachment, TicketUser
+from bot.db.models import AttachmentStatus, DiscordMedia, TicketAttachment, TicketUser
 from bot.storage.files import content_disposition, is_inline
+from bot.storage.media import CONTENT_TYPES
 
 if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client
@@ -73,5 +74,18 @@ async def avatar_url(s3: S3Client, row: TicketUser) -> str | None:
     return await s3.generate_presigned_url(
         "get_object",
         Params={"Bucket": get_settings().s3_bucket, "Key": row.avatar_key},
+        ExpiresIn=get_settings().s3_presign_ttl,
+    )
+
+
+async def media_url(s3: S3Client, media: DiscordMedia) -> str:
+    assert media.storage_key is not None
+    return await s3.generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": get_settings().s3_bucket,
+            "Key": media.storage_key,
+            "ResponseContentType": CONTENT_TYPES[media.extension],
+        },
         ExpiresIn=get_settings().s3_presign_ttl,
     )

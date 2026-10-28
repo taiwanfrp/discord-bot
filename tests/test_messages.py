@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.db.models import (
     AttachmentStatus,
+    DiscordMedia,
+    MediaKind,
     Source,
     Ticket,
     TicketAttachment,
@@ -59,6 +61,7 @@ def make_message(
     attachments: list[Any],
     content: str = "你好",
     edited_at: datetime | None = None,
+    stickers: list[Any] | None = None,
 ) -> discord.Message:
     return cast(
         discord.Message,
@@ -69,6 +72,7 @@ def make_message(
             created_at=CREATED_AT,
             edited_at=edited_at,
             attachments=attachments,
+            stickers=stickers or [],
         ),
     )
 
@@ -123,6 +127,40 @@ async def test_duplicate_message_is_ignored(db: AsyncSession) -> None:
     await save_discord_message(db, ticket, make_message(100, []))
     assert await save_discord_message(db, ticket, make_message(100, [])) == []
     assert await db.scalar(select(func.count()).select_from(TicketMessage)) == 1
+
+
+async def test_emojis_and_stickers_are_recorded(db: AsyncSession) -> None:
+    ticket = await make_ticket(db)
+    stickers = [
+        SimpleNamespace(id=300, name="揮手", format=discord.StickerFormatType.apng),
+        SimpleNamespace(id=301, name="wumpus", format=discord.StickerFormatType.lottie),
+    ]
+    content = "<a:dance:200000000000000001> <:ok:200000000000000002> <:ok:200000000000000002>"
+    await save_discord_message(db, ticket, make_message(100, [], content, stickers=stickers))
+
+    saved = await db.scalar(select(TicketMessage))
+    assert saved is not None and saved.stickers == [
+        {"id": "300", "name": "揮手", "format": "apng"},
+        {"id": "301", "name": "wumpus", "format": "lottie"},
+    ]
+
+    async def recorded() -> set[tuple[int, MediaKind, str]]:
+        rows = await db.scalars(select(DiscordMedia))
+        return {(row.id, row.kind, row.extension) for row in rows}
+
+    assert await recorded() == {
+        (200000000000000001, MediaKind.EMOJI, "gif"),
+        (200000000000000002, MediaKind.EMOJI, "webp"),
+        (300, MediaKind.STICKER, "png"),
+        (301, MediaKind.STICKER, "json"),
+    }
+
+    # 編輯後新增的表情也會記錄，已經記錄過的不會重複
+    edited_at = datetime(2026, 10, 24, 12, 5, tzinfo=UTC)
+    edited = "<:ok:200000000000000002> <:new:200000000000000003>"
+    await edit_discord_message(db, make_message(100, [], edited, edited_at))
+    assert len(await recorded()) == 5
+    assert (200000000000000003, MediaKind.EMOJI, "webp") in await recorded()
 
 
 async def event_types(db: AsyncSession) -> list[tuple[str, int | None]]:

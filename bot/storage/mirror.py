@@ -1,4 +1,4 @@
-"""把 Discord 上的附件與頭像存到 S3（docs/tickets.md 8.1、8.6），由 worker 執行。"""
+"""worker 把 Discord 的附件、頭像、表情與貼圖存到 S3（docs/tickets.md 8.1、8.6、8.7）。"""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from bot.core.config import get_settings
 from bot.core.redis import get_redis
 from bot.db.models import (
     AttachmentStatus,
+    DiscordMedia,
     Ticket,
     TicketAttachment,
     TicketMessage,
@@ -31,6 +32,7 @@ from bot.storage.files import (
     avatar_key,
     check_magic,
 )
+from bot.storage.media import CONTENT_TYPES, discord_url, is_media, media_key
 from bot.storage.s3 import object_exists, s3_client, upload_stream
 from bot.storage.status import finish
 
@@ -40,8 +42,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 CHUNK_SIZE = 1024 * 1024
-# 頭像不會很大，超過就不存
-MAX_AVATAR_SIZE = 10 * 1024 * 1024
+# 頭像、表情、貼圖不會很大，超過就不存
+MAX_SMALL_FILE_SIZE = 10 * 1024 * 1024
 # mirror_attachment 的鎖要比 worker 的 idle_timeout（30 分鐘）長
 ATTACHMENT_LOCK_TIMEOUT = 35 * 60
 # 大檔案一邊下載一邊上傳，可能超過 aiohttp 預設的總時間（5 分鐘），所以只限制連線與每次讀取
@@ -205,7 +207,7 @@ async def mirror_avatars(
         key = avatar_key(user_id, avatar_hash)
         if not await object_exists(s3, key):
             try:
-                body = await download_avatar(http, url)
+                body = await download_small_file(http, url)
             except (aiohttp.ClientError, TimeoutError):
                 # 暫時的錯誤（Discord 5xx、網路）：下次執行再試，不影響其他頭像
                 log.warning("Failed to download the avatar of %d", user_id, exc_info=True)
@@ -225,10 +227,10 @@ async def mirror_avatars(
     return count
 
 
-async def download_avatar(http: aiohttp.ClientSession, url: str) -> bytes | None:
-    """頭像已經不存在（4xx）或超過 MAX_AVATAR_SIZE 時回傳 None。"""
+async def download_small_file(http: aiohttp.ClientSession, url: str) -> bytes | None:
+    """檔案已經不存在（4xx）或超過 MAX_SMALL_FILE_SIZE 時回傳 None。"""
     async with http.get(url) as response:
-        # 429 是暫時的；其他 4xx（403、404 等）表示這個頭像已經取不到了
+        # 429 是暫時的；其他 4xx（403、404 等）表示這個檔案已經取不到了
         if 400 <= response.status < 500 and response.status != 429:
             return None
         response.raise_for_status()
@@ -236,8 +238,8 @@ async def download_avatar(http: aiohttp.ClientSession, url: str) -> bytes | None
         body = bytearray()
         async for chunk in response.content.iter_chunked(CHUNK_SIZE):
             body.extend(chunk)
-            if len(body) > MAX_AVATAR_SIZE:
-                log.warning("Avatar %s is too large", url)
+            if len(body) > MAX_SMALL_FILE_SIZE:
+                log.warning("File %s is too large", url)
                 return None
     return bytes(body)
 
@@ -252,3 +254,44 @@ async def set_avatar(
         .values(avatar_key=key, discord_avatar_url=url)
     )
     await db.commit()
+
+
+async def mirror_media(
+    db: AsyncSession, http: aiohttp.ClientSession, s3: S3Client, limit: int = 100
+) -> int:
+    """把還沒存到 S3 的表情、貼圖存起來，回傳存了幾個。"""
+    rows = list(
+        await db.scalars(
+            select(DiscordMedia)
+            .where(DiscordMedia.status == AttachmentStatus.PENDING)
+            .order_by(DiscordMedia.created_at)
+            .limit(limit)
+        )
+    )
+    count = 0
+    for row in rows:
+        key = media_key(row.kind, row.id, row.extension)
+        if not await object_exists(s3, key):
+            url = discord_url(row.kind, row.id, row.extension)
+            try:
+                body = await download_small_file(http, url)
+            except (aiohttp.ClientError, TimeoutError):
+                # 暫時的錯誤：下次執行再試，不影響其他的
+                log.warning("Failed to download %s", url, exc_info=True)
+                continue
+            if body is None or not is_media(body, row.extension):
+                # 已經取不到（例如表情被刪除），或內容跟副檔名不符：網頁之後還是轉址到 Discord
+                row.status = AttachmentStatus.FAILED
+                await db.commit()
+                continue
+            await s3.put_object(
+                Bucket=get_settings().s3_bucket,
+                Key=key,
+                Body=body,
+                ContentType=CONTENT_TYPES[row.extension],
+            )
+        row.storage_key = key
+        row.status = AttachmentStatus.DONE
+        await db.commit()
+        count += 1
+    return count

@@ -158,6 +158,8 @@
 - [x] Discord 上訊息的編輯、刪除同步到資料庫與網頁（raw 事件）：保留編輯前的每一版（`ticket_message_revision`）與被刪除的內容，網頁上只有客服、管理員看得到；編輯時移除的附件標記 `removed_at`；網頁訊息在 Discord 上被刪除時撤銷分享連結
 - [x] 實際測試：在 Discord 上編輯（改內容、移除附件）、刪除、一次刪除多則，bot 重啟前的訊息也會同步
 - [x] `GET /tickets/{id}/messages/{message_id}`：單則訊息，收到 `message.updated`、`message.deleted` 時重新取得
+- [x] 自訂表情與貼圖：記錄訊息裡用到的表情、貼圖（`discord_media`、`ticket_message.stickers`），scheduler 每分鐘放入 `mirror_media` 存到 S3；`GET /emojis/...`、`GET /stickers/...` 轉址到 S3，還沒存好時轉址到 Discord
+- [ ] 實際測試：在 Discord 傳伺服器內、外的表情、靜態與動態貼圖、Lottie 貼圖，網頁顯示並存到 S3
 - [ ] 網頁上的訊息編輯、刪除
 - [x] Modal 的分數改成下拉選單（discord.py 2.6 起的 `discord.ui.Label`）
 - [x] 實際測試：下拉選單評分

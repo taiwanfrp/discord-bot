@@ -14,6 +14,8 @@ from yarl import URL
 
 from bot.db.models import (
     AttachmentStatus,
+    DiscordMedia,
+    MediaKind,
     Source,
     Ticket,
     TicketAttachment,
@@ -261,3 +263,64 @@ async def test_mirror_avatars(db: AsyncSession, fake_s3: FakeS3) -> None:
     downloads.clear()
     assert await mirror.mirror_avatars(db, cast(Any, FakeHTTP()), cast(Any, fake_s3)) == 0
     assert downloads == ["https://flaky"]
+
+
+async def test_mirror_media(db: AsyncSession, fake_s3: FakeS3) -> None:
+    gif = b"GIF89a" + b"\x00" * 300
+    # acTL 在 IDAT 前面的 PNG 是動態的（APNG）
+    apng = PNG[:8] + (13).to_bytes(4) + b"IHDR" + b"\x00" * 17 + (8).to_bytes(4) + b"acTL" + PNG[8:]
+    lottie = b'{"v": "5.5.2", "layers": []}'
+    db.add_all(
+        DiscordMedia(id=media_id, kind=kind, extension=extension)
+        for media_id, kind, extension in (
+            (1, MediaKind.EMOJI, "gif"),
+            (2, MediaKind.STICKER, "png"),
+            (3, MediaKind.STICKER, "gif"),
+            (4, MediaKind.STICKER, "json"),
+            (5, MediaKind.EMOJI, "webp"),
+            (6, MediaKind.EMOJI, "webp"),
+            (7, MediaKind.STICKER, "json"),
+        )
+    )
+    await db.commit()
+    # S3 上已經有的不再下載
+    fake_s3.objects["emojis/6.webp"] = b"old"
+    responses = {
+        "https://cdn.discordapp.com/emojis/1.gif": FakeResponse(gif),
+        "https://cdn.discordapp.com/stickers/2.png": FakeResponse(apng),
+        # GIF 的貼圖在另一個網域；已經被刪除
+        "https://media.discordapp.net/stickers/3.gif": FakeResponse(b"", 404),
+        "https://cdn.discordapp.com/stickers/4.json": FakeResponse(b"", 500),
+        # 內容跟副檔名不符
+        "https://cdn.discordapp.com/emojis/5.webp": FakeResponse(b"<html></html>"),
+        "https://cdn.discordapp.com/stickers/7.json": FakeResponse(lottie),
+    }
+    downloads: list[str] = []
+
+    class FakeHTTP:
+        def get(self, url: str) -> FakeResponse:
+            downloads.append(url)
+            return responses[url]
+
+    assert await mirror.mirror_media(db, cast(Any, FakeHTTP()), cast(Any, fake_s3)) == 4
+    assert sorted(downloads) == sorted(responses)
+    assert fake_s3.objects == {
+        "emojis/1.gif": gif,
+        "stickers/2.png": apng,
+        "emojis/6.webp": b"old",
+        "stickers/7.json": lottie,
+    }
+    rows = {row.id: (row.status, row.storage_key) for row in await db.scalars(select(DiscordMedia))}
+    assert rows == {
+        1: (AttachmentStatus.DONE, "emojis/1.gif"),
+        2: (AttachmentStatus.DONE, "stickers/2.png"),
+        3: (AttachmentStatus.FAILED, None),
+        4: (AttachmentStatus.PENDING, None),
+        5: (AttachmentStatus.FAILED, None),
+        6: (AttachmentStatus.DONE, "emojis/6.webp"),
+        7: (AttachmentStatus.DONE, "stickers/7.json"),
+    }
+    # 下次只重試暫時失敗的
+    downloads.clear()
+    assert await mirror.mirror_media(db, cast(Any, FakeHTTP()), cast(Any, fake_s3)) == 0
+    assert downloads == ["https://cdn.discordapp.com/stickers/4.json"]

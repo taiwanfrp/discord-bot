@@ -3,6 +3,7 @@ from typing import Any
 
 from sqlalchemy import update
 
+from bot.core.config import get_settings
 from bot.db.models import (
     AttachmentStatus,
     Source,
@@ -182,6 +183,7 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
             content="新的",
             created_at=created_at,
             edited_at=edited_at,
+            stickers=[{"id": "300", "name": "揮手", "format": "apng"}],
         )
         deleted = TicketMessage(
             ticket_id=ticket_id,
@@ -191,6 +193,7 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
             content="貼錯了",
             created_at=created_at,
             deleted_at=edited_at,
+            stickers=[{"id": "301", "name": "wumpus", "format": "lottie"}],
         )
         db.add_all([edited, deleted])
         await db.flush()
@@ -218,15 +221,18 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
         db.add_all(attachments.values())
         await db.commit()
 
-    def summary(page: Any) -> list[tuple[str, list[str], list[str]]]:
+    def summary(page: Any) -> list[tuple[str, list[str], list[str], list[str]]]:
         return [
             (
                 m["content"],
                 [a["filename"] for a in m["attachments"]],
                 [r["content"] for r in m["revisions"]],
+                [s["url"] for s in m["stickers"]],
             )
             for m in page["messages"]
         ]
+
+    stickers = f"{get_settings().public_base_url}/stickers"
 
     def status(filename: str) -> Any:
         return env.client.get(f"/attachments/{attachments[filename].id}")
@@ -240,7 +246,7 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
     page = await messages(env, ticket_id)
     await check_single(page)
     # 開單者只看到已編輯、已刪除的標記
-    assert summary(page) == [("新的", ["kept.png"], []), ("", [], [])]
+    assert summary(page) == [("新的", ["kept.png"], [], [f"{stickers}/300.png"]), ("", [], [], [])]
     assert page["messages"][0]["edited_at"] is not None
     assert page["messages"][1]["deleted_at"] is not None
     assert (await status("kept.png")).status_code == 200
@@ -252,8 +258,8 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
         page = await messages(env, ticket_id)
         await check_single(page)
         assert summary(page) == [
-            ("新的", ["kept.png", "removed.png"], ["舊的"]),
-            ("貼錯了", ["deleted.png"], []),
+            ("新的", ["kept.png", "removed.png"], ["舊的"], [f"{stickers}/300.png"]),
+            ("貼錯了", ["deleted.png"], [], [f"{stickers}/301.json"]),
         ]
         [revision] = page["messages"][0]["revisions"]
         assert revision["created_at"] < revision["replaced_at"]

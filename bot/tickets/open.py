@@ -17,6 +17,7 @@ from bot.db.models import (
 )
 from bot.db.queries import execute_update, get_guild_settings
 from bot.db.types import utcnow
+from bot.storage.media import record_media
 from bot.tickets.channel_name import render_channel_name
 from bot.tickets.controls import TicketControlsView, claim_text
 from bot.tickets.errors import TicketError
@@ -105,6 +106,7 @@ async def open_ticket(
 
     ticket.opening_message_id = message.id
     await db.commit()
+    await record_media(db, f"{subject}\n{content}")
     await send_log(db, guild, opened_log(ticket, category.name))
     return ticket
 

@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from bot.api.schemas import AttachmentOut, MessageOut, MessagePage, RevisionOut, UserOut
 from bot.db.models import Ticket, TicketAttachment, TicketMessage, TicketMessageRevision, TicketUser
+from bot.storage.media import sticker_url
 from bot.storage.share import avatar_url, download_url
 
 if TYPE_CHECKING:
@@ -73,6 +74,9 @@ async def message_page(
     for out in page.messages:
         if out.deleted_at is not None and not staff:
             out.content = ""
+            out.stickers = []
+        for sticker in out.stickers:
+            sticker.url = sticker_url(sticker.id, sticker.format)
         out.attachments = attachments.get(out.id, [])
         out.revisions = revisions.get(out.id, [])
     return page

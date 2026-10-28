@@ -18,6 +18,7 @@ from bot.api.routes import (
     categories,
     events,
     guild,
+    media,
     messages,
     panel,
     permission_roles,
@@ -64,6 +65,7 @@ def create_app(bot: commands.Bot, event_hub: EventHub, s3: S3Client) -> FastAPI:
         messages,
         attachments,
         share,
+        media,
         events,
     ):
         app.include_router(module.router)

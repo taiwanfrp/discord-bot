@@ -4,6 +4,7 @@ from typing import Annotated, Any, Self
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     PlainSerializer,
@@ -356,6 +357,15 @@ class RevisionOut(BaseModel):
     replaced_at: datetime
 
 
+class StickerOut(BaseModel):
+    id: Snowflake
+    name: str
+    # png、apng、gif、lottie（JSON 動畫）
+    format: str
+    # GET /stickers/{id}.{副檔名}（docs/tickets.md 8.7）；不認得的格式是 null
+    url: str | None = None
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -372,6 +382,8 @@ class MessageOut(BaseModel):
     # 網頁訊息才有：pending（還沒送到 Discord）、sent、failed
     delivery_status: DeliveryStatus | None
     attachments: list[AttachmentOut] = []
+    # Discord 訊息的貼圖；被刪除的訊息跟附件一樣，只有這張單的客服、管理員拿得到
+    stickers: Annotated[list[StickerOut], BeforeValidator(lambda value: value or [])] = []
     # 編輯前的每一版（舊的在前面），只有這張單的客服、管理員拿得到
     revisions: list[RevisionOut] = []
 

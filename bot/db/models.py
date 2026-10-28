@@ -38,6 +38,11 @@ class AttachmentStatus(StrEnum):
     FAILED = "failed"
 
 
+class MediaKind(StrEnum):
+    EMOJI = "emoji"
+    STICKER = "sticker"
+
+
 class GuildSettings(Base):
     """全域設定，只有一筆，id 固定為 1。"""
 
@@ -184,6 +189,8 @@ class TicketMessage(Base):
     # 網頁訊息才有
     delivery_status: Mapped[DeliveryStatus | None]
     attempts: Mapped[int] = mapped_column(default=0)
+    # Discord 訊息的貼圖：[{"id": "...", "name": "...", "format": "png"}]（docs/tickets.md 8.7）
+    stickers: Mapped[list[dict[str, str]] | None] = mapped_column(JSON(none_as_null=True))
 
 
 class TicketMessageRevision(Base):
@@ -227,6 +234,24 @@ class TicketAttachment(Base):
     share_revoked_at: Mapped[datetime | None]
     # 編輯 Discord 訊息時被移除的時間；檔案保留，網頁上只有客服、管理員看得到
     removed_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class DiscordMedia(Base):
+    """訊息裡用到的自訂表情與貼圖，存一份到 S3（docs/tickets.md 8.7）。
+
+    同一個表情、貼圖只存一次，不分客服單。
+    """
+
+    __tablename__ = "discord_media"
+
+    # Discord 的表情或貼圖 id
+    id: Mapped[Snowflake] = mapped_column(primary_key=True, autoincrement=False)
+    kind: Mapped[MediaKind]
+    # 表情是 gif（動態）或 webp；貼圖是 png（包括 APNG）、gif 或 json（Lottie）
+    extension: Mapped[str] = mapped_column(String(8))
+    storage_key: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[AttachmentStatus] = mapped_column(default=AttachmentStatus.PENDING)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 

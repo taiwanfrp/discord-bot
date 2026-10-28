@@ -206,6 +206,25 @@ async def mirror_avatars() -> None:
             await lock.release()
 
 
+@broker.task(schedule=[{"cron": "* * * * *"}])
+async def mirror_media() -> None:
+    """把訊息裡還沒存到 S3 的表情、貼圖存起來（還沒存好之前，網頁先轉址到 Discord 的網址）。"""
+    lock = get_redis().lock("ticket-bot:lock:mirror_media", timeout=10 * 60, blocking=False)
+    if not await lock.acquire():
+        # 上一次還在執行；下一分鐘會再執行，不需要重試
+        return
+    try:
+        async with (
+            get_sessionmaker()() as db,
+            aiohttp.ClientSession() as http,
+            s3_client() as s3,
+        ):
+            await mirror.mirror_media(db, http, s3)
+    finally:
+        with contextlib.suppress(LockError):
+            await lock.release()
+
+
 @broker.task(schedule=[{"cron": "*/10 * * * *"}])
 async def requeue_pending_attachments() -> None:
     """補放入 mirror_attachment、verify_attachment。

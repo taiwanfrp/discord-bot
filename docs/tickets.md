@@ -204,7 +204,7 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
    - bot 自己送出的訊息（開單的 embed、閒置提醒等）。這些動作記錄在 `ticket_event`，不算是對話內容。
    - 系統訊息（釘選、加入討論串等），只處理一般訊息與回覆。
    - bot 需要 **Message Content** 這個特權 intent（在 Developer Portal 開啟），否則收到的訊息內容與附件都是空的。
-2. 加密後存進 `ticket_message`，更新作者的快照（8.6）、`ticket.last_message_at`，並清除 `inactivity_reminded_at`（第 9 節）。同一則訊息重複收到時（`discord_message_id` 是唯一的）什麼都不做。
+2. 加密後存進 `ticket_message`，更新作者的快照（8.6）、`ticket.last_message_at`，並清除 `inactivity_reminded_at`（第 9 節）。同一則訊息重複收到時（`discord_message_id` 是唯一的）什麼都不做。貼圖存在 `stickers`，用到的自訂表情與貼圖另外存到 S3（8.7）。
 3. 附件：每個附件存一筆 `ticket_attachment`，同時存下 Discord 的下載網址（`source_url`）。**一定要上傳到 S3**，因為 Discord 的附件網址大約一天就會過期。
    - 副檔名或大小不符合（8.3）：直接記錄為 `rejected`，不放入工作。
    - 符合：記錄為 `pending`，放入 worker 工作 `mirror_attachment`（下載後上傳到 S3）。
@@ -269,7 +269,7 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
 
 - 只依賴 S3 API，Cloudflare R2、AWS S3、Silo（MinIO 的社群分支）等都可以使用。端點與憑證都由環境變數設定。
 - 使用 **private bucket**，因為客服單裡可能有敏感的截圖。bucket 不公開，所有存取都透過 presigned URL。
-- 物件 key：附件是 `tickets/{ticket_id}/{attachment_id}/{filename}`，頭像是 `avatars/{user_id}/{avatar_hash}.{副檔名}`（8.6）。檔名由使用者決定，要先清理（移除路徑分隔符號、控制字元，並限制長度）；原始檔名另外存在資料庫，下載時用 `Content-Disposition` 還原。
+- 物件 key：附件是 `tickets/{ticket_id}/{attachment_id}/{filename}`，頭像是 `avatars/{user_id}/{avatar_hash}.{副檔名}`（8.6），表情與貼圖是 `emojis/{id}.{副檔名}`、`stickers/{id}.{副檔名}`（8.7）。檔名由使用者決定，要先清理（移除路徑分隔符號、控制字元，並限制長度）；原始檔名另外存在資料庫，下載時用 `Content-Disposition` 還原。
 - bot 使用的 S3 金鑰只能存取這個 bucket。
 - bucket 要設定 lifecycle 規則，自動清除沒有完成的 multipart upload（`AbortIncompleteMultipartUpload`）。worker 上傳到一半被強制停止，或是使用者上傳到一半就離開時，已經上傳的部分會留在 S3 上佔用空間。Silo 不接受這個規則，它用自己的 `stale_uploads_expiry` 設定清除。
 - 瀏覽器直接上傳、下載，所以 bucket 要設定 **CORS**：允許前端的網域（`API_CORS_ORIGINS`）使用 `GET`、`HEAD`、`PUT`，`AllowedHeaders` 是 `*`，`ExposeHeaders` 加上 `ETag`（bot 用 ListParts 取得，不需要；前端的上傳套件可能會讀取）。本機開發用 `uv run python -m bot.storage.create_bucket` 設定；正式環境在建立 bucket 時設定。
@@ -340,6 +340,24 @@ GET /a/<attachment_id>/<token>
   1. `avatar_key` 有值：S3 的 presigned URL。
   2. `discord_avatar_url` 有值（頭像還沒存到 S3，最多等 1 分鐘）：先用 Discord 的網址。
   3. 都沒有：使用者沒有自訂頭像，或頭像已經取不到，前端依照 Discord 的規則顯示預設頭像。
+
+### 8.7 自訂表情與貼圖
+
+- **自訂表情**在訊息內容裡是 `<:名稱:id>`，動態的是 `<a:名稱:id>`，其他伺服器的表情也一樣；Unicode 表情就是字元本身。內容照原樣存，網頁顯示時換成圖片。網頁送出的 `<:名稱:id>` 在 Discord 上也會顯示成表情。
+- **貼圖**不在內容和附件裡，而是在 `message.stickers`。存訊息時把每個貼圖的 id、名稱、格式存進 `ticket_message.stickers`（JSON）。貼圖不能編輯。
+  - 格式：`png`、`apng`（動態）、`gif`、`lottie`（JSON 動畫，Discord 內建的貼圖大多是這種，網頁目前只顯示名稱）。
+  - APNG 照原檔存成 `.png`，不轉成 GIF：APNG 本身就是 PNG，現在的瀏覽器都能直接播放（不支援的只顯示第一格）；GIF 只有 256 色，透明只有全透明或不透明，貼圖的邊緣會有鋸齒。
+- **存一份到 S3**：表情、貼圖在 Discord 上被刪除之後就取不到了，紀錄裡的也會跟著壞掉。
+  1. 存訊息之後（Discord 的訊息、編輯後的內容、網頁的訊息、開單的主旨與內容），把用到的表情、貼圖記錄到 `discord_media`。同一個只記錄一次，不分客服單。用另一個 session 寫入：同時有另一則訊息記錄同一個表情時，只有這裡失敗，不影響訊息；沒記錄到的下次出現時再記錄。
+  2. scheduler 每分鐘放入 `mirror_media()`，worker 把 `pending` 的下載後存到 `emojis/{id}.{gif 或 webp}`、`stickers/{id}.{png、gif 或 json}`，S3 上已經有的就不下載。來源是 `https://cdn.discordapp.com/emojis/{id}.{副檔名}`、`https://cdn.discordapp.com/stickers/{id}.{副檔名}`；GIF 的貼圖不在這個網域，而是 `https://media.discordapp.net/stickers/{id}.gif`。
+  3. Discord 上已經取不到（`429` 以外的 4xx），或內容跟副檔名不符（magic bytes；Lottie 只檢查開頭是不是 `{`）：記錄為 `failed`。暫時的錯誤下次再試。
+- **網頁顯示**：`GET /emojis/{id}.{gif 或 webp}`、`GET /stickers/{id}.{png、gif 或 json}`。不需要登入，表情、貼圖在 Discord 上本來就是公開的。回傳 `302`：
+  - 已經存到 S3：轉址到新的 presigned URL，快取的時間是有效期限的一半（`Cache-Control: private`）。
+  - 還沒存好（最多等 1 分鐘）、已經取不到，或是這個功能之前的訊息：轉址到 Discord 的網址，快取 60 秒。
+  - 速率限制：每個 IP 每分鐘 600 次，一頁訊息裡可能有很多不同的表情。
+  - 用轉址而不是在 API 回傳網址：網頁顯示 Markdown 的地方（訊息、開單內容、編輯前的內容）都能直接用，也不會遇到 presigned URL 過期。
+- 訊息的 API 回傳 `stickers`（id、名稱、格式、`url`）。被刪除的訊息的貼圖跟附件一樣，只有這張單的客服、管理員拿得到。
+- 這個功能之前的訊息沒有記錄貼圖。
 
 ## 9. 閒置提醒與自動關閉
 
@@ -414,6 +432,7 @@ GET /a/<attachment_id>/<token>
 | `deliver_messages(ticket_id)`：依照順序把網頁的訊息透過 webhook 送到 Discord | bot（API）、`verify_attachment`（訊息在等的附件檢查完時） |
 | `requeue_pending_messages()`：重新放入超過 10 分鐘還沒送出的訊息的 `deliver_messages` | scheduler（每 10 分鐘） |
 | `mirror_avatars()`：把還沒存到 S3 的頭像存起來，再寫入 `avatar_key`（S3 上已經有同一個 hash 的檔案就不下載，見 8.6） | scheduler（每分鐘） |
+| `mirror_media()`：把訊息裡用到、還沒存到 S3 的表情與貼圖存起來（8.7） | scheduler（每分鐘） |
 | `send_close_notifications(ticket_id)`：關單後的私訊（連結、評分） | 關單的流程（bot 或 worker） |
 | `requeue_close_notifications()`：重新放入一天內關閉、私訊還沒處理完的 `send_close_notifications` | scheduler（每 10 分鐘） |
 | `check_inactive_tickets()`：閒置提醒、自動關閉 | scheduler（每 5 分鐘） |
@@ -554,6 +573,7 @@ ticket_message
   author_id
   🔒content（最新的內容）, created_at, edited_at, deleted_at（被刪除時內容不清空，8.1）
   delivery_status（網頁訊息才有：pending | sent | failed）, attempts
+  stickers（JSON，Discord 訊息的貼圖：id、名稱、格式，8.7）
 
 ticket_message_revision（編輯前的內容，一筆是一個舊版本，8.1）
   id, message_id, 🔒content
@@ -569,6 +589,10 @@ ticket_attachment
   share_token_hash（分享連結 token 的 SHA-256，只有網頁上傳的附件才有）, share_revoked_at
   removed_at（編輯訊息時被移除的時間，檔案保留）
   created_at
+
+discord_media（訊息裡用到的自訂表情與貼圖，不分客服單，8.7）
+  id（Discord 的 id）, kind（emoji | sticker）, extension
+  storage_key, status（pending | done | failed）, created_at
 
 ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
   id, ticket_id, type, actor_id（null 表示系統）, data（JSON）, created_at
@@ -597,7 +621,7 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
 ## 14. API
 
 - bot 有自己的網域，endpoint 直接放在根路徑底下。
-- 除了 `GET /health`、`POST /auth/exchange`、`GET /a/{attachment_id}/{token}` 以外，所有 endpoint 都需要登入（bot 的 cookie），權限依照第 4 節判斷。
+- 除了 `GET /health`、`POST /auth/exchange`、`GET /a/{attachment_id}/{token}`、`GET /emojis/...`、`GET /stickers/...` 以外，所有 endpoint 都需要登入（bot 的 cookie），權限依照第 4 節判斷。
 - Discord ID 在 JSON 裡一律用**字串**，因為 snowflake 超過 JavaScript 的安全整數範圍。
 - 回應用 gzip 壓縮（`GZipMiddleware`，等級 6），瀏覽器會自動解壓縮。小於 500 bytes 的回應不壓縮；SSE（`text/event-stream`）也不壓縮，否則事件會被緩衝住，不能即時送到瀏覽器。
   - BREACH 攻擊要回應裡同時有祕密和攻擊者能控制的內容。這裡的 cookie 在 header 裡，不會被壓縮；回應裡的 presigned URL，也是看得到這張單的人本來就拿得到的，所以沒有實際的風險。
@@ -623,6 +647,7 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
 | 訊息 | `GET`、`POST /tickets/{id}/messages`、`GET /tickets/{id}/messages/{message_id}`（單則） | 依照權限 |
 | 附件 | `POST /tickets/{id}/attachments`（取得上傳網址）、`POST /attachments/{attachment_id}/parts`（分塊上傳每一塊的網址）、`POST /attachments/{attachment_id}/complete`、`DELETE /attachments/{attachment_id}`（移除還沒送出的附件）、`GET /attachments/{attachment_id}`（附件的資料與新的 presigned URL） | 依照權限；上傳的操作只有上傳的人，還沒送出的附件也只有上傳的人看得到；編輯時移除的附件、被刪除的訊息的附件只有客服、管理員看得到 |
 | 分享連結 | `GET /a/{attachment_id}/{token}`（302 轉址到新的 presigned URL，見 8.4.1） | 不需要登入，用 token 驗證 |
+| 表情、貼圖 | `GET /emojis/{id}.{副檔名}`、`GET /stickers/{id}.{副檔名}`（302 轉址到 S3 或 Discord，見 8.7） | 不需要登入 |
 | 操作 | `POST /tickets/{id}/claim`、`/unclaim`、`/transfer`、`/close`、`/members`，`DELETE /tickets/{id}/members/{user_id}` | 依照權限 |
 | 評分 | `PUT /tickets/{id}/rating`（分數 1–5、評語） | 開單者，只能一次 |
 | 即時事件 | `GET /events`、`GET /tickets/{id}/events`（SSE） | 依照權限 |

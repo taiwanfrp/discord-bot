@@ -19,6 +19,7 @@ from bot.db.models import (
 from bot.db.queries import execute_update, get_guild_settings
 from bot.db.types import utcnow
 from bot.storage.files import allowed_file_types, is_allowed_extension
+from bot.storage.media import record_media, sticker_data
 from bot.tickets.actions import require_open
 from bot.tickets.delivery import MAX_LENGTH, max_length
 from bot.tickets.errors import TicketError
@@ -40,6 +41,7 @@ async def save_discord_message(
         author_id=message.author.id,
         content=message.content,
         created_at=message.created_at,
+        stickers=sticker_data(message.stickers),
     )
     db.add(saved)
     try:
@@ -85,6 +87,7 @@ async def save_discord_message(
         )
     )
     await db.commit()
+    await record_media(db, message.content, saved.stickers)
     return [a.id for a in attachments if a.status is AttachmentStatus.PENDING]
 
 
@@ -144,6 +147,7 @@ async def edit_discord_message(db: AsyncSession, message: discord.Message) -> No
         )
     )
     await db.commit()
+    await record_media(db, message.content)
 
 
 async def delete_discord_messages(db: AsyncSession, discord_message_ids: Collection[int]) -> None:
@@ -261,6 +265,7 @@ async def create_web_message(
         )
     )
     await db.commit()
+    await record_media(db, content)
     for attachment in attachments:
         await db.refresh(attachment)
     return message, attachments
