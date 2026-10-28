@@ -59,3 +59,18 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+  deploy:
+    name: Deploy
+    needs: docker
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Trigger deploy webhook
+        env:
+          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          curl -sS --fail-with-body -X POST -H "Authorization: Bearer $DEPLOY_TOKEN" "$DEPLOY_WEBHOOK_URL"
