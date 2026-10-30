@@ -5,15 +5,10 @@ from typing import Any
 
 import discord
 
-from bot.core.config import get_settings
 from bot.db.engine import get_sessionmaker
 from bot.tickets import actions
 from bot.tickets.controls import handle_error
-
-
-def ticket_url(ticket_id: int) -> str:
-    """網頁上的紀錄頁面。"""
-    return get_settings().web_ticket_url.replace("{id}", str(ticket_id))
+from bot.tickets.log import ticket_url
 
 
 def closed_view(ticket_id: int, *, rating: bool) -> discord.ui.View:

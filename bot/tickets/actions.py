@@ -343,7 +343,8 @@ async def close(
     await queue_close_notifications(ticket.id)
 
     category = await db.get(TicketCategory, ticket.category_id)
-    await send_log(db, guild, closed_log(ticket, category.name if category else "（已刪除）"))
+    category_name = category.name if category else "（已刪除）"
+    await send_log(db, guild, ticket.id, closed_log(ticket, category_name))
     if delete_channel and ticket.channel_id is not None:
         try:
             channel = await get_text_channel(guild, ticket.channel_id)

@@ -107,7 +107,7 @@ async def open_ticket(
     ticket.opening_message_id = message.id
     await db.commit()
     await record_media(db, f"{subject}\n{content}")
-    await send_log(db, guild, opened_log(ticket, category.name))
+    await send_log(db, guild, ticket.id, opened_log(ticket, category.name))
     return ticket
 
 

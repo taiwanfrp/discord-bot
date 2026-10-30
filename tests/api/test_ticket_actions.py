@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 from sqlalchemy import select, text
 
 from bot.db.models import AttachmentStatus, Source, Ticket, TicketAttachment, TicketEvent
+from bot.tickets.log import ticket_url
 from tests.api.helpers import (
     ADMIN_ROLE_ID,
     USER_ID,
@@ -176,6 +177,8 @@ async def test_close(env: Env, close_notifications: AsyncMock) -> None:
     assert response.json()["closed_by_id"] == str(OPENER)
     channel.delete.assert_awaited_once()
     assert log_channel.send.call_args.kwargs["embed"].title == f"客服單 #{ticket_id} 已關閉"
+    [link] = log_channel.send.call_args.kwargs["view"].children
+    assert link.url == ticket_url(ticket_id)
     # 私訊由 worker 送出
     close_notifications.assert_awaited_once_with(ticket_id)
 

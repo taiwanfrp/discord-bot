@@ -384,7 +384,7 @@ GET /a/<attachment_id>/<token>
 ## 10. 關單、紀錄與評分
 
 1. 更新 `status=closed`、`closed_at`、`closed_by_id`、`close_reason`（自動關閉時記錄為系統）。
-2. 送出 SSE 事件 `ticket.closed`，並在 log 頻道送出通知（如果有設定；開單時也會通知）。
+2. 送出 SSE 事件 `ticket.closed`，並在 log 頻道送出通知（如果有設定；開單時也會通知），附上網頁紀錄頁面的連結。
 3. 刪除頻道，webhook 會跟著被刪除。同時**撤銷這張客服單所有的分享連結**（設定 `share_revoked_at`）：頻道刪除後已經沒有人需要它們，就算連結事先被複製出去，關單後也打不開。紀錄頁面不受影響，網頁看附件是用需要登入的 `GET /attachments/{attachment_id}`。
 4. 放入 worker 工作 `send_close_notifications`，送出私訊（embed：分類、關閉者、主旨、關閉原因）：
    - **開單者**：「查看紀錄」（紀錄頁面的連結，`WEB_TICKET_URL`）+ 「評分」按鈕。
