@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 
 from bot.api.schemas import AttachmentOut, MessageOut, MessagePage, RevisionOut, UserOut
-from bot.db.models import Ticket, TicketAttachment, TicketMessage, TicketMessageRevision, TicketUser
+from bot.db.models import Ticket, TicketAttachment, TicketMessage, TicketUser
 from bot.storage.media import sticker_url
 from bot.storage.share import avatar_url, download_url
+from bot.tickets.history import visible_attachments, visible_revisions
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,35 +32,15 @@ async def attachment_out(s3: S3Client, attachment: TicketAttachment) -> Attachme
 async def message_page(
     db: AsyncSession, s3: S3Client, ticket: Ticket, messages: list[TicketMessage], *, staff: bool
 ) -> MessagePage:
-    """訊息加上附件、編輯前的內容與作者的快照。
-
-    被刪除的訊息、編輯前的內容、編輯時移除的附件，只有這張單的客服、管理員（staff）看得到
-    （docs/tickets.md 8.1）。
-    """
-    message_ids = [message.id for message in messages if staff or message.deleted_at is None]
-    attachment_query = select(TicketAttachment).where(TicketAttachment.message_id.in_(message_ids))
-    if not staff:
-        attachment_query = attachment_query.where(TicketAttachment.removed_at.is_(None))
-    attachments: dict[int, list[AttachmentOut]] = {}
-    for attachment in await db.scalars(attachment_query.order_by(TicketAttachment.id)):
-        assert attachment.message_id is not None
-        attachments.setdefault(attachment.message_id, []).append(
-            await attachment_out(s3, attachment)
-        )
-    revisions: dict[int, list[RevisionOut]] = {}
-    if staff:
-        for revision in await db.scalars(
-            select(TicketMessageRevision)
-            .where(
-                TicketMessageRevision.message_id.in_(
-                    [message.id for message in messages if message.edited_at is not None]
-                )
-            )
-            .order_by(TicketMessageRevision.id)
-        ):
-            revisions.setdefault(revision.message_id, []).append(
-                RevisionOut.model_validate(revision)
-            )
+    """訊息加上附件、編輯前的內容與作者的快照（看得到的範圍見 bot/tickets/history.py）。"""
+    attachments = {
+        message_id: [await attachment_out(s3, attachment) for attachment in rows]
+        for message_id, rows in (await visible_attachments(db, messages, staff=staff)).items()
+    }
+    revisions = {
+        message_id: [RevisionOut.model_validate(revision) for revision in rows]
+        for message_id, rows in (await visible_revisions(db, messages, staff=staff)).items()
+    }
     authors = await db.scalars(
         select(TicketUser).where(
             TicketUser.ticket_id == ticket.id,

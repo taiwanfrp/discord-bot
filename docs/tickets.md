@@ -269,7 +269,7 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
 
 - 只依賴 S3 API，Cloudflare R2、AWS S3、Silo（MinIO 的社群分支）等都可以使用。端點與憑證都由環境變數設定。
 - 使用 **private bucket**，因為客服單裡可能有敏感的截圖。bucket 不公開，所有存取都透過 presigned URL。
-- 物件 key：附件是 `tickets/{ticket_id}/{attachment_id}/{filename}`，頭像是 `avatars/{user_id}/{avatar_hash}.{副檔名}`（8.6），表情與貼圖是 `emojis/{id}.{副檔名}`、`stickers/{id}.{副檔名}`（8.7）。檔名由使用者決定，要先清理（移除路徑分隔符號、控制字元，並限制長度）；原始檔名另外存在資料庫，下載時用 `Content-Disposition` 還原。
+- 物件 key：附件是 `tickets/{ticket_id}/{attachment_id}/{filename}`，頭像是 `avatars/{user_id}/{avatar_hash}.{副檔名}`（8.6），表情與貼圖是 `emojis/{id}.{副檔名}`、`stickers/{id}.{副檔名}`（8.7），匯出的檔案是 `exports/{export_id}/ticket-{ticket_id}.{html 或 zip}`（8.8）。檔名由使用者決定，要先清理（移除路徑分隔符號、控制字元，並限制長度）；原始檔名另外存在資料庫，下載時用 `Content-Disposition` 還原。
 - bot 使用的 S3 金鑰只能存取這個 bucket。
 - bucket 要設定 lifecycle 規則，自動清除沒有完成的 multipart upload（`AbortIncompleteMultipartUpload`）。worker 上傳到一半被強制停止，或是使用者上傳到一半就離開時，已經上傳的部分會留在 S3 上佔用空間。Silo 不接受這個規則，它用自己的 `stale_uploads_expiry` 設定清除。
 - 瀏覽器直接上傳、下載，所以 bucket 要設定 **CORS**：允許前端的網域（`API_CORS_ORIGINS`）使用 `GET`、`HEAD`、`PUT`，`AllowedHeaders` 是 `*`，`ExposeHeaders` 加上 `ETag`（bot 用 ListParts 取得，不需要；前端的上傳套件可能會讀取）。本機開發用 `uv run python -m bot.storage.create_bucket` 設定；正式環境在建立 bucket 時設定。
@@ -359,6 +359,43 @@ GET /a/<attachment_id>/<token>
 - 訊息的 API 回傳 `stickers`（id、名稱、格式、`url`）。被刪除的訊息的貼圖跟附件一樣，只有這張單的客服、管理員拿得到。
 - 這個功能之前的訊息沒有記錄貼圖。
 
+### 8.8 匯出
+
+網頁上的「匯出」把一張客服單的紀錄下載成檔案，離線也能看。開單者、這張單的客服、管理員可以匯出（額外加入的成員不行），內容跟各自在網頁上看到的一樣：開單者匯出的沒有被刪除的訊息、編輯前的內容與編輯時移除的附件。
+
+```mermaid
+sequenceDiagram
+    participant W as 網頁
+    participant A as bot API
+    participant K as worker
+    participant S as S3
+    W->>A: POST /tickets/{id}/exports（UTC 時差）
+    A->>K: export_ticket(export_id)
+    loop 每 2 秒
+        W->>A: GET /exports/{id}
+    end
+    K->>S: 產生後上傳 exports/{export_id}/ticket-{id}.html 或 .zip
+    A-->>W: done + presigned URL
+    W->>S: 下載
+```
+
+- **格式**：依照匯出的人看得到的附件決定。
+  - 沒有附件（有檔案的）：一個 HTML 檔，頭像、表情、貼圖用 base64 寫在裡面。
+  - 有附件：ZIP，裡面是 `transcript.html` 和 `assets/`（`avatars/`、`emojis/`、`stickers/`、`attachments/{附件 id}/{檔名}`）。HTML 用相對路徑引用，圖片、影片、音訊直接顯示或播放，其他檔案是連結。
+  - 沒有通過檢查、無法保存的附件只顯示檔名與原因。
+- **版面跟網頁的工單頁一樣**（標題列、左邊對話紀錄、右邊工單資訊，深色模式跟著系統）。範本是 `bot/templates/export.html.j2`（Jinja2，自動跳脫），樣式是 `bot/templates/export.css`：把網頁用的 Tailwind、Nuxt UI 的 class 換成實際的數值，不需要建置。圖示用網頁同一套（Heroicons、Simple Icons）的 SVG。字型先用 Noto Sans TC，沒有安裝就用系統字型（字型檔太大，不放進檔案）。
+- **HTML 沒有 JavaScript**，CSS 也寫在檔案裡，不連外部的網址：郵件、雲端硬碟的預覽等不執行 JavaScript 的地方也能正常顯示。防雷的內容在滑鼠移上去或用 Tab 選到時顯示。
+  - 同一張圖在 CSS 裡只寫一次（`background-image`），HTML 用 class 引用，同一個人的頭像、同一個表情出現很多次也不會變大。
+  - 訊息內容用 markdown-it-py 轉成 HTML（`bot/tickets/markdown.py`），規則跟網頁的一樣；`<@id>` 換成快照裡的名稱。
+  - 時間在產生時就寫好，依照網頁送來的 UTC 時差（瀏覽器的時區）。
+- **worker 產生**（`export_ticket`），不在 API 的請求裡產生：附件可能有好幾 GB，產生的時間可能超過 reverse proxy 的逾時，也不能佔住 bot。
+  - ZIP 一邊從 S3 讀附件，一邊寫進 ZIP，同時用 multipart upload 上傳，不會把整個檔案讀進記憶體。圖片、影片本來就壓縮過，不再壓縮；HTML 用 deflate。沒有大小上限。
+  - 頭像、表情、貼圖優先用 S3 上的備份，沒有的話從 Discord 下載，都拿不到時顯示預設的頭像、表情的名稱。
+  - 還有附件沒存到 S3（`pending`）時丟出例外，稍後重試；最後一次就不等了，那些附件只顯示檔名。最後一次也失敗時標記為 `failed`。
+  - 用 Redis 鎖確保同一個匯出只有一個 worker 在產生；不是 `pending` 的直接略過。
+- 同一個人在同一張單還有沒完成的匯出時（例如連按兩次），`POST` 回傳那一個。每個人每小時最多匯出 10 次，超過回傳 `429`：有大附件的單，每次都會在 S3 多一份完整的 ZIP。`GET /exports/{id}` 只有匯出的人自己拿得到，完成時附上新的 presigned URL（`Content-Disposition: attachment`，檔名是 `ticket-{id}.html` 或 `.zip`）。
+- 匯出的檔案保留 24 小時，由 scheduler 每小時放入的 `delete_expired_exports` 刪除（S3 上的檔案與資料）。
+
 ## 9. 閒置提醒與自動關閉
 
 | 時間 | 動作 |
@@ -433,6 +470,8 @@ GET /a/<attachment_id>/<token>
 | `requeue_pending_messages()`：重新放入超過 10 分鐘還沒送出的訊息的 `deliver_messages` | scheduler（每 10 分鐘） |
 | `mirror_avatars()`：把還沒存到 S3 的頭像存起來，再寫入 `avatar_key`（S3 上已經有同一個 hash 的檔案就不下載，見 8.6） | scheduler（每分鐘） |
 | `mirror_media()`：把訊息裡用到、還沒存到 S3 的表情與貼圖存起來（8.7） | scheduler（每分鐘） |
+| `export_ticket(export_id)`：產生匯出的 HTML 或 ZIP，存到 S3（8.8） | bot（API） |
+| `delete_expired_exports()`：刪除超過 24 小時的匯出 | scheduler（每小時） |
 | `send_close_notifications(ticket_id)`：關單後的私訊（連結、評分） | 關單的流程（bot 或 worker） |
 | `requeue_close_notifications()`：重新放入一天內關閉、私訊還沒處理完的 `send_close_notifications` | scheduler（每 10 分鐘） |
 | `check_inactive_tickets()`：閒置提醒、自動關閉 | scheduler（每 5 分鐘） |
@@ -594,6 +633,10 @@ discord_media（訊息裡用到的自訂表情與貼圖，不分客服單，8.7�
   id（Discord 的 id）, kind（emoji | sticker）, extension
   storage_key, status（pending | done | failed）, created_at
 
+ticket_export（匯出，24 小時後刪除，8.8）
+  id, ticket_id, requested_by_id, staff（匯出時是不是這張單的客服、管理員）, utc_offset（分鐘）
+  status（pending | done | failed）, format（html | zip）, storage_key, size, created_at, finished_at
+
 ticket_event（時間軸、稽核紀錄；所有 SSE 事件都會寫在這裡）
   id, ticket_id, type, actor_id（null 表示系統）, data（JSON）, created_at
 ```
@@ -650,6 +693,7 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
 | 表情、貼圖 | `GET /emojis/{id}.{副檔名}`、`GET /stickers/{id}.{副檔名}`（302 轉址到 S3 或 Discord，見 8.7） | 不需要登入 |
 | 操作 | `POST /tickets/{id}/claim`、`/unclaim`、`/transfer`、`/close`、`/members`，`DELETE /tickets/{id}/members/{user_id}` | 依照權限 |
 | 評分 | `PUT /tickets/{id}/rating`（分數 1–5、評語） | 開單者，只能一次 |
+| 匯出 | `POST /tickets/{id}/exports`（`utc_offset`）、`GET /exports/{export_id}`（狀態與下載網址，見 8.8） | 開單者、這張單的客服、管理員；`GET` 只有匯出的人 |
 | 即時事件 | `GET /events`、`GET /tickets/{id}/events`（SSE） | 依照權限 |
 
 FastAPI 會自動產生 OpenAPI 文件（`/docs`），給前端開發時參考。
@@ -663,7 +707,8 @@ FastAPI 會自動產生 OpenAPI 文件（`/docs`），給前端開發時參考�
 | 訊息保存 | 每則訊息送出時就存進資料庫，內容加密 | 網頁要即時同步；紀錄頁面直接使用 |
 | 訊息的編輯、刪除 | 同步 Discord 上的編輯、刪除；保留編輯前的每一版與被刪除的內容，網頁上只有客服、管理員看得到 | 處理爭議時有紀錄；開單者看到的跟 Discord 上一樣，貼錯的東西刪掉後其他成員就看不到 |
 | 名稱與頭像 | 每張客服單保存每個人的快照，關單後不再更新；頭像存到 S3 | 使用者改名、換頭像或刪除帳號後，紀錄頁面仍然顯示當時的樣子 |
-| 紀錄頁面 | 由前端用結構化的資料產生 | 之後改版型、搜尋、控制權限、評分都比較容易；需要時再加「匯出成 HTML 檔」 |
+| 紀錄頁面 | 由前端用結構化的資料產生 | 之後改版型、搜尋、控制權限、評分都比較容易 |
+| 匯出 | 沒有附件是一個 HTML 檔，有附件是 HTML 加上 assets 的 ZIP；worker 產生，不用 JavaScript（8.8） | 一個檔案方便寄送；附件完整保存；不執行 JavaScript 的地方也能看 |
 | ORM / migration | SQLAlchemy 2.0 async + Alembic | 一套程式碼支援三種資料庫 |
 | 即時事件 | SSE | 瀏覽器只需要接收；會自動重新連線；可以帶 cookie |
 | 附件儲存 | S3 相容 API，private bucket，presigned URL 預設 10 分鐘 | 不綁定特定的服務商；檔案不經過 bot |

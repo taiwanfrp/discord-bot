@@ -1,0 +1,215 @@
+{#-
+	匯出的客服單（docs/tickets.md 8.8），版面照網頁的工單頁（前端 repo 的 app/pages/tickets/[id].vue）。
+	資料由 bot/tickets/export.py 準備；訊息內容是先轉好的 HTML（Markup），其他文字由 Jinja2 自動跳脫。
+-#}
+{%- from "icons.html.j2" import icon -%}
+
+{%- macro time(value) -%}
+<time datetime="{{ value.iso }}" title="{{ value.title }}">{{ value.text }}</time>
+{%- endmacro -%}
+
+{%- macro person(user) -%}
+<span class="person"><span class="avatar avatar-sm {{ user.avatar_class }}"></span>{{ user.name }}</span>
+{%- endmacro -%}
+
+{%- macro attachment(item) -%}
+<div class="attachment" id="attachment-{{ item.id }}">
+	{%- if item.kind == "unavailable" %}
+	<div class="attachment-card">
+		{{ icon("pending" if item.pending else "warning", "" if item.pending else "is-error") }}
+		<span class="attachment-name">{{ item.name }}</span>
+		<span class="attachment-info">{{ item.status_text }}</span>
+	</div>
+	{%- elif item.kind == "image" %}
+	<a class="attachment-image" href="{{ item.href }}" target="_blank" rel="noopener">
+		<img src="{{ item.href }}" alt="{{ item.name }}" title="{{ item.name }}" loading="lazy">
+	</a>
+	{%- elif item.kind in ("video", "audio") %}
+	<{{ item.kind }} class="attachment-media" src="{{ item.href }}" controls preload="metadata" title="{{ item.name }}"></{{ item.kind }}>
+	{%- else %}
+	<a class="attachment-card" href="{{ item.href }}" target="_blank" rel="noopener">
+		{{ icon("document") }}
+		<span class="attachment-name">{{ item.name }}</span>
+		<span class="attachment-info">{{ item.size }}</span>
+	</a>
+	{%- endif %}
+	{%- if item.removed %}
+	<p class="attachment-removed">這個附件已在 Discord 上被移除（只有客服看得到）</p>
+	{%- endif %}
+</div>
+{%- endmacro -%}
+
+{%- macro message(item) -%}
+<li class="message" id="message-{{ item.id }}">
+	<span class="avatar {{ item.author.avatar_class }}"></span>
+	<div class="message-body">
+		<div class="author">
+			<span class="name"{% if item.author.color %} style="color: {{ item.author.color }}"{% endif %}>{{ item.author.name }}</span>
+			{%- if item.author.badge %}
+			<span class="badge badge-sm badge-{{ item.author.badge.color }}">{{ item.author.badge.label }}</span>
+			{%- endif %}
+			{{ icon(item.source, "source", "來自網頁" if item.source == "globe" else "來自 Discord") }}
+			<span class="time">{{ time(item.created_at) }}</span>
+			{%- if item.edited_at %}
+			<span class="edited" title="{{ item.edited_at.title }}">（已編輯）</span>
+			{%- endif %}
+		</div>
+		{%- if item.deleted %}
+		<p class="deleted-label">{{ "此訊息已被刪除（只有客服看得到原本的內容）" if item.content else "此訊息已被刪除" }}</p>
+		{%- endif %}
+		{%- if item.content %}
+		<div class="content discord-md{% if item.jumbo %} is-jumbo{% endif %}{% if item.deleted %} is-deleted{% endif %}">{{ item.content }}</div>
+		{%- endif %}
+		{%- if item.stickers %}
+		<div class="stickers"{% if item.deleted %} style="opacity: 0.6"{% endif %}>
+			{%- for sticker in item.stickers %}
+			{%- if sticker.css_class %}
+			<span class="sticker {{ sticker.css_class }}" role="img" aria-label="{{ sticker.name }}" title="{{ sticker.name }}"></span>
+			{%- else %}
+			<span class="sticker-name">{{ icon("smile") }}貼圖：{{ sticker.name }}</span>
+			{%- endif %}
+			{%- endfor %}
+		</div>
+		{%- endif %}
+		{%- if item.attachments %}
+		<div class="attachments">
+			{%- for entry in item.attachments %}
+			{{ attachment(entry) }}
+			{%- endfor %}
+		</div>
+		{%- endif %}
+		{%- if item.delivery_failed %}
+		<p class="delivery-failed">{{ icon("warning") }}無法傳送到 Discord</p>
+		{%- endif %}
+		{%- if item.revisions %}
+		<details class="revisions">
+			<summary>編輯紀錄（{{ item.revisions | length }}）</summary>
+			<ol>
+				{%- for revision in item.revisions %}
+				<li>
+					<span class="revision-time">{{ time(revision.created_at) }} – {{ time(revision.replaced_at) }}</span>
+					<div class="discord-md">{{ revision.content }}</div>
+				</li>
+				{%- endfor %}
+			</ol>
+		</details>
+		{%- endif %}
+	</div>
+</li>
+{%- endmacro -%}
+
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>工單 #{{ ticket.id }} {{ ticket.subject }}</title>
+	<style>
+{{ css }}
+	</style>
+</head>
+<body>
+<div class="container">
+	{%- if as_zip %}
+	<div class="notice">{{ icon("warning") }}看不到圖片或附件的話，請先把整個 ZIP 檔解壓縮，再打開裡面的 {{ transcript_name }}。</div>
+	{%- endif %}
+
+	<!-- 標題列 -->
+	<div>
+		<div class="title-meta">
+			<span class="ticket-id">#{{ ticket.id }}</span>
+			<span class="badge badge-{{ ticket.status.color }}">{{ icon(ticket.status.icon) }}{{ ticket.status.label }}</span>
+			<span>{% if ticket.category_emoji %}<span class="category-emoji">{{ ticket.category_emoji }}</span>{% endif %}{{ ticket.category_name }}</span>
+		</div>
+		<h1 class="title">{{ ticket.subject }}</h1>
+	</div>
+
+	<div class="grid">
+		<!-- 對話 -->
+		<div class="main">
+			<section class="card">
+				<div class="card-header"><h2>對話紀錄</h2></div>
+				<div class="card-body">
+					<ol class="messages">
+						{{ message(opening) }}
+						{%- for item in messages %}
+						{{ message(item) }}
+						{%- endfor %}
+					</ol>
+				</div>
+			</section>
+		</div>
+
+		<!-- 工單資訊 -->
+		<div class="side">
+			<section class="card">
+				<div class="card-header"><h2>工單資訊</h2></div>
+				<div class="card-body">
+					<dl class="details">
+						<div>
+							<dt>狀態</dt>
+							<dd><span class="badge badge-{{ ticket.status.color }}">{{ icon(ticket.status.icon) }}{{ ticket.status.label }}</span></dd>
+						</div>
+						<div>
+							<dt>開單者</dt>
+							<dd>{{ person(info.opener) }}</dd>
+						</div>
+						<div>
+							<dt>負責客服</dt>
+							<dd>{% if info.claimer %}{{ person(info.claimer) }}{% else %}<span class="unassigned">尚未指派</span>{% endif %}</dd>
+						</div>
+						{%- if info.members %}
+						<div>
+							<dt>其他成員</dt>
+							<dd class="people">{% for member in info.members %}{{ person(member) }}{% endfor %}</dd>
+						</div>
+						{%- endif %}
+						<div>
+							<dt>建立時間</dt>
+							<dd>{{ time(info.created_at) }}</dd>
+						</div>
+						<div>
+							<dt>最後活動</dt>
+							<dd>{{ time(info.last_activity) }}</dd>
+						</div>
+						{%- if info.closed_at %}
+						<div>
+							<dt>關閉時間</dt>
+							<dd>{{ time(info.closed_at) }}</dd>
+						</div>
+						<div>
+							<dt>關閉者</dt>
+							<dd>{{ info.closed_by }}</dd>
+						</div>
+						{%- if info.close_reason %}
+						<div>
+							<dt>關閉原因</dt>
+							<dd class="pre">{{ info.close_reason }}</dd>
+						</div>
+						{%- endif %}
+						{%- endif %}
+						{%- if info.rating %}
+						<div>
+							<dt>評分</dt>
+							<dd>
+								<div class="stars" title="{{ info.rating }} / 5">
+									{%- for value in range(1, 6) %}
+									{{ icon("star-solid" if value <= info.rating else "star", "is-filled" if value <= info.rating else "") }}
+									{%- endfor %}
+								</div>
+								{%- if info.feedback %}
+								<p class="pre" style="margin: 0.25rem 0 0">{{ info.feedback }}</p>
+								{%- endif %}
+							</dd>
+						</div>
+						{%- endif %}
+					</dl>
+				</div>
+			</section>
+		</div>
+	</div>
+
+	<p class="footer">於 {{ time(exported_at) }} 匯出{% if staff %}，包含被刪除的訊息與編輯紀錄{% endif %}</p>
+</div>
+</body>
+</html>

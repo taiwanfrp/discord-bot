@@ -26,7 +26,7 @@ from bot.db.types import utcnow
 from bot.storage import mirror, uploads
 from bot.storage.s3 import s3_client
 from bot.storage.status import finish
-from bot.tickets import delivery, inactivity, notifications
+from bot.tickets import delivery, export, inactivity, notifications
 from bot.tickets.open import add_opener, pending_openers_query
 from bot.tickets.permissions import staff_role_ids, sync_role_overwrites
 from bot.worker.broker import ContextDep, DiscordDep, broker, is_last_attempt
@@ -287,3 +287,32 @@ async def delete_unsent_attachments() -> None:
     """刪除上傳之後一直沒有送出的附件（例如使用者關掉網頁）。"""
     async with get_sessionmaker()() as db, s3_client() as s3:
         await uploads.delete_unsent(db, s3)
+
+
+@broker.task
+async def export_ticket(export_id: int, context: Context = ContextDep) -> None:
+    """產生客服單的匯出檔案，存到 S3（docs/tickets.md 8.8）。"""
+    async with (
+        get_sessionmaker()() as db,
+        aiohttp.ClientSession() as http,
+        s3_client() as s3,
+    ):
+        try:
+            await export.export_ticket(
+                db, s3, http, export_id, last_attempt=is_last_attempt(context)
+            )
+        except export.ExportBusy:
+            # 結果由持有鎖的 worker 寫入
+            raise
+        except Exception:
+            if is_last_attempt(context):
+                await db.rollback()
+                await export.give_up(db, export_id)
+            raise
+
+
+@broker.task(schedule=[{"cron": "30 * * * *"}])
+async def delete_expired_exports() -> None:
+    """刪除超過 24 小時的匯出檔案。"""
+    async with get_sessionmaker()() as db, s3_client() as s3:
+        await export.delete_expired(db, s3)

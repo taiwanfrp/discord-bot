@@ -1,0 +1,266 @@
+/*
+ * 匯出的 HTML 用的樣式（docs/tickets.md 8.8），外觀照網頁的工單頁（前端 repo 的
+ * app/pages/tickets/[id].vue）：Tailwind 與 Nuxt UI 的 class 換成實際的數值，不需要建置。
+ * 顏色是 Tailwind v4 的色票；Nuxt UI 淺色用 500、深色用 400。
+ */
+:root {
+	color-scheme: light dark;
+	--page: #ffffff;
+	--dot: #d1d5db;
+	--card: rgb(255 255 255 / 0.5);
+	--ring: rgb(229 231 235 / 0.5);
+	--divider: #e2e8f0;
+	--border: #e5e7eb;
+	--text-strong: #111827;
+	--text: #374151;
+	--text-soft: #4b5563;
+	--muted: #6b7280;
+	--dimmed: #9ca3af;
+	--elevated: #f1f5f9;
+	--accented: #cbd5e1;
+	--neutral-text: #334155;
+	--hover: rgb(17 24 39 / 0.05);
+	--primary: oklch(72.3% 0.219 149.579);
+	--primary-text: oklch(62.7% 0.194 149.214);
+	--warning: oklch(79.5% 0.184 86.047);
+	--info: oklch(62.3% 0.214 259.815);
+	--error: oklch(63.7% 0.237 25.331);
+	--star: oklch(85.2% 0.199 91.936);
+	--star-empty: #d1d5db;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--page: #030712;
+		--dot: #374151;
+		--card: rgb(17 24 39 / 0.5);
+		--ring: rgb(31 41 55 / 0.5);
+		--divider: #1e293b;
+		--border: #1f2937;
+		--text-strong: #ffffff;
+		--text: #e5e7eb;
+		--text-soft: #d1d5db;
+		--muted: #9ca3af;
+		--dimmed: #6b7280;
+		--elevated: #1e293b;
+		--accented: #334155;
+		--neutral-text: #e2e8f0;
+		--hover: rgb(255 255 255 / 0.05);
+		--primary: oklch(79.2% 0.209 151.711);
+		--primary-text: oklch(79.2% 0.209 151.711);
+		--warning: oklch(85.2% 0.199 91.936);
+		--info: oklch(70.7% 0.165 254.624);
+		--error: oklch(70.4% 0.191 22.216);
+		--star-empty: #4b5563;
+	}
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--page); }
+
+body {
+	margin: 0;
+	min-height: 100vh;
+	color: var(--text-strong);
+	font-family: "Noto Sans TC", system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+	font-size: 16px;
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+	/* 網頁的點狀背景 */
+	background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
+	background-size: 24px 24px;
+	background-attachment: fixed;
+}
+
+img, video, audio { display: block; }
+
+.icon { width: 1em; height: 1em; flex-shrink: 0; }
+
+.container { max-width: 72rem; margin: 0 auto; padding: 2rem 1rem; display: flex; flex-direction: column; gap: 1.5rem; }
+@media (min-width: 640px) { .container { padding: 2rem 1.5rem; } }
+@media (min-width: 1024px) { .container { padding: 2rem; } }
+
+/* 解壓縮的提示 */
+.notice {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+	padding: 0.75rem 1rem;
+	border-radius: 0.5rem;
+	font-size: 0.875rem;
+	color: var(--neutral-text);
+	background: color-mix(in oklab, var(--info) 10%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--info) 25%, transparent);
+}
+.notice .icon { width: 1.25rem; height: 1.25rem; color: var(--info); }
+
+/* 標題列 */
+.title-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--muted); }
+.ticket-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.title { margin: 0.5rem 0 0; font-size: 1.5rem; line-height: 2rem; font-weight: 700; overflow-wrap: anywhere; }
+.category-emoji { margin-right: 0.25rem; }
+
+/* 兩欄：左邊對話、右邊工單資訊 */
+.grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+@media (min-width: 1024px) {
+	.grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+	.grid .main { grid-column: span 2 / span 2; }
+	.grid .side { grid-column-start: 3; grid-row-start: 1; }
+}
+.main, .side { min-width: 0; }
+
+/* UCard */
+.card {
+	border-radius: 0.5rem;
+	overflow: hidden;
+	background: var(--card);
+	-webkit-backdrop-filter: blur(8px);
+	backdrop-filter: blur(8px);
+	box-shadow: 0 0 0 1px var(--ring), 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+.card-header { padding: 1rem; border-bottom: 1px solid var(--divider); }
+.card-body { padding: 1rem; }
+@media (min-width: 640px) { .card-header { padding: 1rem 1.5rem; } .card-body { padding: 1.5rem; } }
+.card-header h2 { margin: 0; font-size: 1rem; line-height: 1.5rem; font-weight: 600; }
+
+/* UBadge（subtle） */
+.badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.25rem 0.5rem;
+	border-radius: 0.375rem;
+	font-size: 0.75rem;
+	line-height: 1rem;
+	font-weight: 500;
+	--badge: var(--primary);
+	color: var(--badge);
+	background: color-mix(in oklab, var(--badge) 10%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--badge) 25%, transparent);
+	white-space: nowrap;
+}
+.badge .icon { width: 1rem; height: 1rem; }
+.badge-sm { padding: 0.25rem 0.375rem; font-size: 10px; line-height: 0.75rem; border-radius: 0.25rem; }
+.badge-warning { --badge: var(--warning); }
+.badge-info { --badge: var(--info); }
+.badge-error { --badge: var(--error); }
+.badge-neutral { color: var(--neutral-text); background: var(--elevated); box-shadow: inset 0 0 0 1px var(--accented); }
+
+/* 對話 */
+.messages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.25rem; }
+.message { display: flex; gap: 0.75rem; }
+.avatar {
+	width: 2.25rem;
+	height: 2.25rem;
+	flex-shrink: 0;
+	border-radius: 9999px;
+	background-color: var(--elevated);
+	background-size: cover;
+	background-position: center;
+}
+.avatar-sm { width: 1.25rem; height: 1.25rem; }
+.message-body { min-width: 0; flex: 1; }
+.author { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.name { font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; color: var(--text-strong); }
+.source { width: 0.875rem; height: 0.875rem; color: var(--dimmed); }
+.time { font-size: 0.75rem; line-height: 1rem; color: var(--muted); }
+.edited { font-size: 0.75rem; line-height: 1rem; color: var(--dimmed); }
+.deleted-label { margin: 0.25rem 0 0; font-size: 0.875rem; font-style: italic; color: var(--muted); }
+.content { margin-top: 0.25rem; font-size: 0.875rem; line-height: 1.25rem; color: var(--text); }
+.is-deleted { opacity: 0.6; text-decoration: line-through; text-decoration-color: var(--dimmed); }
+.delivery-failed { display: flex; align-items: center; gap: 0.25rem; margin: 0.25rem 0 0; font-size: 0.75rem; color: var(--error); }
+.delivery-failed .icon { width: 0.75rem; height: 0.75rem; }
+
+/* 貼圖 */
+.stickers { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; }
+.stickers.is-deleted { text-decoration: none; }
+.sticker { width: 10rem; height: 10rem; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.sticker-name {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	padding: 0.375rem 0.625rem;
+	border-radius: 0.5rem;
+	font-size: 0.875rem;
+	color: var(--text-soft);
+	background: var(--elevated);
+}
+
+/* 附件 */
+.attachments { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
+.attachment { max-width: 100%; }
+.attachment-card {
+	display: inline-flex;
+	max-width: 100%;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	font-size: 0.875rem;
+	color: inherit;
+	text-decoration: none;
+}
+a.attachment-card:hover { background: var(--hover); }
+.attachment-card .icon { width: 1rem; height: 1rem; color: var(--dimmed); }
+.attachment-card .icon.is-error { color: var(--error); }
+.attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+a.attachment-card .attachment-name { font-weight: 500; color: var(--primary-text); }
+.attachment-info { flex-shrink: 0; font-size: 0.75rem; color: var(--muted); }
+.attachment-image { width: fit-content; max-width: 100%; }
+.attachment-image img { max-height: 18rem; max-width: 100%; border: 1px solid var(--border); border-radius: 0.5rem; object-fit: contain; }
+.attachment-media { max-height: 20rem; max-width: 100%; border: 1px solid var(--border); border-radius: 0.5rem; }
+audio.attachment-media { border: 0; }
+.attachment-removed { margin: 0.25rem 0 0; font-size: 0.75rem; color: var(--muted); }
+
+/* 編輯前的內容 */
+.revisions { margin-top: 0.25rem; font-size: 0.75rem; color: var(--muted); }
+.revisions summary { cursor: pointer; user-select: none; }
+.revisions ol { list-style: none; margin: 0.5rem 0 0; padding-left: 0.75rem; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 0.5rem; }
+.revision-time { display: block; color: var(--dimmed); }
+.revisions .discord-md { font-size: 0.875rem; line-height: 1.25rem; color: var(--text-soft); }
+
+/* 工單資訊 */
+.details { margin: 0; display: flex; flex-direction: column; gap: 1rem; font-size: 0.875rem; line-height: 1.25rem; }
+.details dt { color: var(--muted); }
+.details dd { margin: 0.25rem 0 0; color: var(--text-strong); }
+.details .person { display: flex; align-items: center; gap: 0.5rem; }
+.details .people { display: flex; flex-direction: column; gap: 0.25rem; }
+.details .unassigned { color: var(--dimmed); }
+.details .pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.stars { display: flex; gap: 0.125rem; }
+.stars .icon { width: 1rem; height: 1rem; color: var(--star-empty); }
+.stars .icon.is-filled { color: var(--star); }
+
+.footer { text-align: center; font-size: 0.75rem; color: var(--muted); }
+
+/* 訊息內容（前端的 TicketMarkdown.vue） */
+.discord-md { overflow-wrap: anywhere; }
+.discord-md p { margin: 0; }
+.discord-md p + p, .discord-md p + ul, .discord-md p + ol, .discord-md p + pre, .discord-md p + blockquote { margin-top: 0.5em; }
+.discord-md h1, .discord-md h2, .discord-md h3 { font-weight: 700; line-height: 1.3; margin: 0.5em 0 0.25em; }
+.discord-md h1 { font-size: 1.5em; }
+.discord-md h2 { font-size: 1.25em; }
+.discord-md h3 { font-size: 1.1em; }
+.discord-md > :first-child { margin-top: 0; }
+.discord-md > :last-child { margin-bottom: 0; }
+.discord-md ul, .discord-md ol { padding-left: 1.5em; margin: 0.25em 0; }
+.discord-md ul { list-style: disc; }
+.discord-md ol { list-style: decimal; }
+.discord-md blockquote { border-left: 4px solid var(--accented); padding-left: 0.75em; margin: 0.25em 0; }
+.discord-md a { color: var(--primary); text-decoration: none; }
+.discord-md a:hover { text-decoration: underline; }
+.discord-md code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.875em; background-color: var(--elevated); padding: 0.1em 0.3em; border-radius: 4px; }
+.discord-md pre { margin: 0.25em 0; background-color: var(--elevated); border: 1px solid var(--divider); border-radius: 6px; padding: 0.5em 0.75em; overflow-x: auto; }
+.discord-md pre code { background-color: transparent; padding: 0; }
+.discord-md .md-emoji { display: inline-block; width: 1.375em; height: 1.375em; vertical-align: -0.3em; background-size: contain; background-repeat: no-repeat; background-position: center; }
+.discord-md.is-jumbo { font-size: 2.5em; line-height: 1.2; }
+.discord-md .md-timestamp { background-color: var(--elevated); border-radius: 4px; padding: 0 0.2em; }
+.discord-md .md-subtext { font-size: 0.75em; color: var(--muted); }
+.discord-md .md-mention { border-radius: 4px; padding: 0 0.2em; color: var(--primary-text); background: color-mix(in oklab, var(--primary) 15%, transparent); }
+/* 防雷：沒有 JavaScript，滑鼠移上去或用 Tab 選到時顯示 */
+.discord-md .md-spoiler { border-radius: 4px; padding: 0 0.15em; color: transparent; background-color: var(--dimmed); transition: background-color 0.15s, color 0.15s; }
+.discord-md .md-spoiler * { color: transparent; }
+.discord-md .md-spoiler:hover, .discord-md .md-spoiler:focus { color: inherit; background-color: var(--elevated); }
+.discord-md .md-spoiler:hover *, .discord-md .md-spoiler:focus * { color: inherit; }

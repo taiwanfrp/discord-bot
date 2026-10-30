@@ -11,6 +11,7 @@ def client_error(code: str, operation: str) -> ClientError:
 class FakeBody:
     def __init__(self, data: bytes) -> None:
         self.data = data
+        self.position = 0
 
     async def __aenter__(self) -> "FakeBody":
         return self
@@ -18,8 +19,11 @@ class FakeBody:
     async def __aexit__(self, *_: object) -> None:
         pass
 
-    async def read(self) -> bytes:
-        return self.data
+    async def read(self, amt: int | None = None) -> bytes:
+        end = len(self.data) if amt is None else self.position + amt
+        chunk = self.data[self.position : end]
+        self.position += len(chunk)
+        return chunk
 
 
 class FakeS3:
@@ -71,6 +75,8 @@ class FakeS3:
         return {"ContentLength": len(self.objects[Key])}
 
     async def get_object(self, *, Key: str, Range: str | None = None, **_: Any) -> dict[str, Any]:
+        if Key not in self.objects:
+            raise client_error("NoSuchKey", "GetObject")
         data = self.objects[Key]
         if Range is not None:
             start, end = Range.removeprefix("bytes=").split("-")

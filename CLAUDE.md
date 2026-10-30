@@ -46,7 +46,8 @@ bot/
 ├── api/             # HTTP API（FastAPI，跟 bot 在同一個程序）：routes、dependencies、CSRF
 ├── db/              # 資料庫：models、自訂型別（UTCDateTime、EncryptedText）、engine 與 session、commit 後推送 ticket_event 的 hook
 ├── storage/         # S3（aiobotocore）、附件的檔案規則（副檔名、magic bytes、key）、附件、頭像、表情與貼圖存到 S3、網頁上傳（presigned URL、檢查）、分享連結
-├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式、Discord 訊息的保存與編輯、刪除、網頁訊息與附件、用 webhook 送到 Discord、關單私訊與評分、閒置提醒與自動關閉
+├── tickets/         # 客服單的共用邏輯與 Discord 介面：開單流程、使用者快照、面板、按鈕、頻道名稱格式、Discord 訊息的保存與編輯、刪除、網頁訊息與附件、用 webhook 送到 Discord、關單私訊與評分、閒置提醒與自動關閉、匯出（HTML、ZIP）與 Discord Markdown 轉 HTML
+├── templates/       # Jinja2 範本與 CSS（匯出的 HTML）
 ├── worker/          # 背景工作：broker（queue、重試）、scheduler、tasks
 └── cogs/            # 每個模組（或含 __init__.py 的資料夾）都會被自動載入
 migrations/          # Alembic migration

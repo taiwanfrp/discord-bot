@@ -38,6 +38,12 @@ class AttachmentStatus(StrEnum):
     FAILED = "failed"
 
 
+class ExportStatus(StrEnum):
+    PENDING = "pending"
+    DONE = "done"
+    FAILED = "failed"
+
+
 class MediaKind(StrEnum):
     EMOJI = "emoji"
     STICKER = "sticker"
@@ -253,6 +259,27 @@ class DiscordMedia(Base):
     storage_key: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[AttachmentStatus] = mapped_column(default=AttachmentStatus.PENDING)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class TicketExport(Base):
+    """匯出的檔案（docs/tickets.md 8.8），24 小時後刪除。"""
+
+    __tablename__ = "ticket_export"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("ticket.id"), index=True)
+    requested_by_id: Mapped[Snowflake]
+    # 匯出時是這張單的客服、管理員：包含被刪除的訊息、編輯前的內容、編輯時移除的附件
+    staff: Mapped[bool]
+    # 網頁送來的 UTC 時差（分鐘），時間依照這個時區顯示
+    utc_offset: Mapped[int]
+    status: Mapped[ExportStatus] = mapped_column(default=ExportStatus.PENDING)
+    # html 或 zip，產生時才決定
+    format: Mapped[str | None] = mapped_column(String(8))
+    storage_key: Mapped[str | None] = mapped_column(String(255))
+    size: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+    finished_at: Mapped[datetime | None]
 
 
 class TicketEvent(Base):

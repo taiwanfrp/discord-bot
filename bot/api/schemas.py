@@ -12,7 +12,7 @@ from pydantic import (
     model_validator,
 )
 
-from bot.db.models import AttachmentStatus, DeliveryStatus, Source, TicketStatus
+from bot.db.models import AttachmentStatus, DeliveryStatus, ExportStatus, Source, TicketStatus
 from bot.tickets.channel_name import validate_template
 
 # Discord ID 在 JSON 裡一律用字串（超過 JavaScript 的安全整數範圍）
@@ -393,3 +393,24 @@ class MessagePage(BaseModel):
     messages: list[MessageOut]
     # 這些訊息的作者的快照
     users: list[UserOut]
+
+
+class ExportIn(BaseModel):
+    # 瀏覽器的 UTC 時差（分鐘，台灣是 480），匯出的時間依照這個時區顯示
+    utc_offset: int = Field(ge=-12 * 60, le=14 * 60)
+
+
+class ExportOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ticket_id: int
+    # pending（產生中）、done、failed
+    status: ExportStatus
+    # html（沒有附件）或 zip（HTML 加上 assets 資料夾），產生完才有
+    format: str | None
+    size: int | None
+    created_at: datetime
+    finished_at: datetime | None
+    # 完成時才有，有效期限是 S3_PRESIGN_TTL
+    download_url: str | None = None
