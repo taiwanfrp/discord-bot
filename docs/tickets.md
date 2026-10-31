@@ -384,7 +384,7 @@ sequenceDiagram
   - 沒有附件（有檔案的）：一個 HTML 檔，頭像、表情、貼圖用 base64 寫在裡面。
   - 有附件：ZIP，裡面是 `transcript.html` 和 `assets/`（`avatars/`、`emojis/`、`stickers/`、`attachments/{附件 id}/{檔名}`）。HTML 用相對路徑引用，圖片、影片、音訊直接顯示或播放，其他檔案是連結。
   - 沒有通過檢查、無法保存的附件只顯示檔名與原因。
-- **版面跟網頁的工單頁一樣**（標題列、左邊對話紀錄、右邊工單資訊，深色模式跟著系統）。範本是 `bot/templates/export.html.j2`（Jinja2，自動跳脫），樣式是 `bot/templates/export.css`：把網頁用的 Tailwind、Nuxt UI 的 class 換成實際的數值，不需要建置。圖示用網頁同一套（Heroicons、Simple Icons）的 SVG。字型先用 Noto Sans TC，沒有安裝就用系統字型（字型檔太大，不放進檔案）。
+- **版面跟網頁的工單頁一樣**（標題列、左邊對話紀錄、右邊工單資訊，深色模式跟著系統）。範本是 `bot/templates/export.html.j2`（Jinja2，自動跳脫），樣式是 `bot/templates/export.css`：把網頁用的 Tailwind、Nuxt UI 的 class 換成實際的數值，不需要建置。圖示用網頁同一套（Heroicons、Simple Icons）的 SVG。背景也跟網頁一樣（圖片、半透明遮罩、點狀圖案），圖片是網頁的 `background.png` 縮小成 1280 寬的 WebP（約 56 KB，`bot/templates/background.webp`），網頁換背景時要一起換。字型先用 Noto Sans TC，沒有安裝就用系統字型（字型檔太大，不放進檔案）。
 - **HTML 沒有 JavaScript**，CSS 也寫在檔案裡，不連外部的網址：郵件、雲端硬碟的預覽等不執行 JavaScript 的地方也能正常顯示。防雷的內容在滑鼠移上去或用 Tab 選到時顯示。
   - 同一張圖在 CSS 裡只寫一次（`background-image`），HTML 用 class 引用，同一個人的頭像、同一個表情出現很多次也不會變大。
   - 訊息內容用 markdown-it-py 轉成 HTML（`bot/tickets/markdown.py`），規則跟網頁的一樣；`<@id>` 換成快照裡的名稱。

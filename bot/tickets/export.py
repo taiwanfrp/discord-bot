@@ -15,6 +15,7 @@ import zipfile
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from importlib import resources
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -104,6 +105,15 @@ class Image:
     path: str
     content_type: str
     data: bytes
+
+
+# 網頁的背景圖片（縮小後的 WebP），跟頭像一樣用 CSS class 引用
+BACKGROUND = Image(
+    "page-background",
+    "assets/background.webp",
+    "image/webp",
+    (resources.files("bot") / "templates" / "background.webp").read_bytes(),
+)
 
 
 @dataclass
@@ -262,7 +272,7 @@ class Renderer:
         self.tz = tz
         self.now = now
         self.as_zip = as_zip
-        self.images: dict[str, Image] = {}
+        self.images: dict[str, Image] = {BACKGROUND.css_class: BACKGROUND}
 
     async def load_images(self, s3: S3Client, http: aiohttp.ClientSession) -> None:
         for user in self.transcript.users.values():

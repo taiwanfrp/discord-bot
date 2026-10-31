@@ -6,6 +6,7 @@
 :root {
 	color-scheme: light dark;
 	--page: #ffffff;
+	--overlay: rgb(255 255 255 / 0.3);
 	--dot: #d1d5db;
 	--card: rgb(255 255 255 / 0.5);
 	--ring: rgb(229 231 235 / 0.5);
@@ -32,6 +33,7 @@
 @media (prefers-color-scheme: dark) {
 	:root {
 		--page: #030712;
+		--overlay: rgb(3 7 18 / 0.55);
 		--dot: #374151;
 		--card: rgb(17 24 39 / 0.5);
 		--ring: rgb(31 41 55 / 0.5);
@@ -67,17 +69,28 @@ body {
 	font-size: 16px;
 	line-height: 1.5;
 	-webkit-font-smoothing: antialiased;
-	/* 網頁的點狀背景 */
+}
+
+/*
+ * 網頁的背景（前端 repo 的 app/app.vue）：背景圖片、半透明的遮罩加上模糊、中間比較明顯的點狀圖案。
+ * 圖片是網頁的 public/background.png 縮小後轉成 WebP（bot/templates/background.webp）
+ */
+.background { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--page); }
+.background > div { position: absolute; inset: 0; }
+.background-image { background-size: cover; background-position: center; background-repeat: no-repeat; }
+.background-overlay { background: var(--overlay); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.background-dots {
 	background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
 	background-size: 24px 24px;
-	background-attachment: fixed;
+	-webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+	mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
 }
 
 img, video, audio { display: block; }
 
 .icon { width: 1em; height: 1em; flex-shrink: 0; }
 
-.container { max-width: 72rem; margin: 0 auto; padding: 2rem 1rem; display: flex; flex-direction: column; gap: 1.5rem; }
+.container { position: relative; z-index: 10; max-width: 72rem; margin: 0 auto; padding: 2rem 1rem; display: flex; flex-direction: column; gap: 1.5rem; }
 @media (min-width: 640px) { .container { padding: 2rem 1.5rem; } }
 @media (min-width: 1024px) { .container { padding: 2rem; } }
 

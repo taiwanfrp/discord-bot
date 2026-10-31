@@ -244,6 +244,8 @@ async def test_html_export_for_opener(db: AsyncSession) -> None:
     assert 'style="color: #ff0000"' in page
     # 每張圖只寫一次 base64，用 CSS class 引用
     assert page.count("data:image/png;base64,") == 4
+    # 網頁的背景圖片
+    assert page.count("data:image/webp;base64,") == 1
     assert f'class="md-emoji emoji-{EMOJI_ID}"' in page
     assert f'class="sticker sticker-{STICKER_ID}"' in page
     assert "已轉發" in page and "被轉發的 <strong>內容</strong>" in page
@@ -267,6 +269,7 @@ async def test_zip_export_for_staff(db: AsyncSession) -> None:
     names = set(archive.namelist())
     assert names == {
         "transcript.html",
+        "assets/background.webp",
         f"assets/avatars/{OPENER}.png",
         f"assets/avatars/{STAFF}.png",
         f"assets/emojis/{EMOJI_ID}.png",
