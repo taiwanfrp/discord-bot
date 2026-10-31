@@ -62,6 +62,7 @@ def make_message(
     content: str = "你好",
     edited_at: datetime | None = None,
     stickers: list[Any] | None = None,
+    snapshots: list[Any] | None = None,
 ) -> discord.Message:
     return cast(
         discord.Message,
@@ -73,6 +74,10 @@ def make_message(
             edited_at=edited_at,
             attachments=attachments,
             stickers=stickers or [],
+            message_snapshots=snapshots or [],
+            reference=SimpleNamespace(guild_id=1, channel_id=2, message_id=3)
+            if snapshots
+            else None,
         ),
     )
 
@@ -161,6 +166,46 @@ async def test_emojis_and_stickers_are_recorded(db: AsyncSession) -> None:
     await edit_discord_message(db, make_message(100, [], edited, edited_at))
     assert len(await recorded()) == 5
     assert (200000000000000003, MediaKind.EMOJI, "webp") in await recorded()
+
+
+async def test_forwarded_message(db: AsyncSession) -> None:
+    """轉發的訊息：被轉發的內容與附件在 message_snapshots，轉發時加上的文字還是在 content。"""
+    ticket = await make_ticket(db)
+    snapshot = SimpleNamespace(
+        content="原本的訊息 <:ok:200000000000000002>",
+        created_at=datetime(2026, 10, 1, 8, 0, tzinfo=UTC),
+        attachments=[make_attachment(10, "截圖.png")],
+        stickers=[SimpleNamespace(id=300, name="揮手", format=discord.StickerFormatType.png)],
+    )
+    message = make_message(100, [], "請看這個", snapshots=[snapshot])
+    assert await save_discord_message(db, ticket, message) == [1]
+
+    saved = await db.scalar(select(TicketMessage))
+    assert saved is not None
+    assert (saved.content, saved.forwarded_content) == (
+        "請看這個",
+        "原本的訊息 <:ok:200000000000000002>",
+    )
+    assert saved.forwarded_from == {
+        "created_at": "2026-10-01T08:00:00+00:00",
+        "guild_id": "1",
+        "channel_id": "2",
+        "message_id": "3",
+        "stickers": [{"id": "300", "name": "揮手", "format": "png"}],
+    }
+    attachment = await db.scalar(select(TicketAttachment))
+    assert attachment is not None
+    assert (attachment.message_id, attachment.discord_attachment_id) == (saved.id, 10)
+    media = {row.id for row in await db.scalars(select(DiscordMedia))}
+    assert media == {200000000000000002, 300}
+
+    # 編輯（例如 Discord 更新連結預覽）時，快照裡的附件不算被移除
+    edited_at = datetime(2026, 10, 24, 12, 5, tzinfo=UTC)
+    await edit_discord_message(
+        db, make_message(100, [], "請看這個！", edited_at, snapshots=[snapshot])
+    )
+    await db.refresh(attachment)
+    assert attachment.removed_at is None
 
 
 async def event_types(db: AsyncSession) -> list[tuple[str, int | None]]:

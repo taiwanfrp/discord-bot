@@ -32,7 +32,7 @@ from bot.storage.files import (
     avatar_key,
     check_magic,
 )
-from bot.storage.media import CONTENT_TYPES, discord_url, is_media, media_key
+from bot.storage.media import CONTENT_TYPES, discord_url, is_media, media_key, message_attachments
 from bot.storage.s3 import object_exists, s3_client, upload_stream
 from bot.storage.status import finish
 
@@ -153,7 +153,8 @@ async def fresh_url(
         discord_message = await channel.fetch_message(message.discord_message_id)
     except discord.NotFound as error:
         raise SourceGone from error
-    for item in discord_message.attachments:
+    # 轉發的訊息的附件在 message_snapshots 裡
+    for item in message_attachments(discord_message):
         if item.id == attachment.discord_attachment_id:
             return item.url
     raise SourceGone

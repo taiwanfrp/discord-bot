@@ -126,7 +126,21 @@ async def make_ticket(db: AsyncSession, s3: FakeS3, *, with_file: bool) -> Ticke
             content="不小心傳的密碼",
             deleted_at=datetime(2026, 10, 28, 6, 6, tzinfo=UTC),
         ),
-        TicketMessage(ticket_id=ticket.id, source=Source.WEB, author_id=OPENER, content="附件"),
+        # 轉發的訊息：附件顯示在被轉發的內容裡
+        TicketMessage(
+            ticket_id=ticket.id,
+            source=Source.WEB,
+            author_id=OPENER,
+            content="附件",
+            forwarded_content="被轉發的 **內容**",
+            forwarded_from={
+                "created_at": "2026-10-01T08:00:00+00:00",
+                "guild_id": None,
+                "channel_id": None,
+                "message_id": None,
+                "stickers": [{"id": str(STICKER_ID), "name": "Wumpus", "format": "png"}],
+            },
+        ),
     ]
     db.add_all(messages)
     await db.flush()
@@ -232,6 +246,8 @@ async def test_html_export_for_opener(db: AsyncSession) -> None:
     assert page.count("data:image/png;base64,") == 4
     assert f'class="md-emoji emoji-{EMOJI_ID}"' in page
     assert f'class="sticker sticker-{STICKER_ID}"' in page
+    assert "已轉發" in page and "被轉發的 <strong>內容</strong>" in page
+    assert ">2026/10/01 16:00</time>" in page
     # 沒有通過檢查的附件只顯示檔名與原因
     assert "病毒.exe" in page and "不符合附件規則" in page
     # 開單者看不到被刪除的訊息、它的附件與編輯紀錄

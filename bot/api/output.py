@@ -6,7 +6,14 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from bot.api.schemas import AttachmentOut, MessageOut, MessagePage, RevisionOut, UserOut
+from bot.api.schemas import (
+    AttachmentOut,
+    ForwardedOut,
+    MessageOut,
+    MessagePage,
+    RevisionOut,
+    UserOut,
+)
 from bot.db.models import Ticket, TicketAttachment, TicketMessage, TicketUser
 from bot.storage.media import sticker_url
 from bot.storage.share import avatar_url, download_url
@@ -26,6 +33,17 @@ async def user_out(s3: S3Client, row: TicketUser) -> UserOut:
 async def attachment_out(s3: S3Client, attachment: TicketAttachment) -> AttachmentOut:
     out = AttachmentOut.model_validate(attachment)
     out.download_url = await download_url(s3, attachment)
+    return out
+
+
+def forwarded_out(message: TicketMessage) -> ForwardedOut | None:
+    if message.forwarded_from is None:
+        return None
+    out = ForwardedOut.model_validate(
+        {**message.forwarded_from, "content": message.forwarded_content or ""}
+    )
+    for sticker in out.stickers:
+        sticker.url = sticker_url(sticker.id, sticker.format)
     return out
 
 
@@ -52,10 +70,13 @@ async def message_page(
         messages=[MessageOut.model_validate(message) for message in messages],
         users=[await user_out(s3, row) for row in authors],
     )
+    by_id = {message.id: message for message in messages}
     for out in page.messages:
         if out.deleted_at is not None and not staff:
             out.content = ""
             out.stickers = []
+        else:
+            out.forwarded = forwarded_out(by_id[out.id])
         for sticker in out.stickers:
             sticker.url = sticker_url(sticker.id, sticker.format)
         out.attachments = attachments.get(out.id, [])

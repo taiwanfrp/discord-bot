@@ -148,8 +148,9 @@ async def load(db: AsyncSession, ticket: Ticket, *, staff: bool) -> Transcript:
     stickers: dict[int, str] = {}
     for message in messages:
         if staff or message.deleted_at is None:
-            texts.append(message.content)
-            for sticker in message.stickers or []:
+            texts += [message.content, message.forwarded_content or ""]
+            forwarded_stickers = (message.forwarded_from or {}).get("stickers", [])
+            for sticker in [*(message.stickers or []), *forwarded_stickers]:
                 extension = STICKER_EXTENSIONS.get(sticker["format"])
                 if extension is not None and extension != "json":
                     stickers[int(sticker["id"])] = extension
@@ -393,15 +394,30 @@ class Renderer:
         )
         return item
 
-    def message(self, message: TicketMessage) -> dict[str, Any]:
-        deleted = message.deleted_at is not None
-        visible = self.staff or not deleted
-        stickers = []
-        for sticker in (message.stickers or []) if visible else []:
+    def stickers(self, stickers: list[dict[str, str]]) -> list[dict[str, str | None]]:
+        result: list[dict[str, str | None]] = []
+        for sticker in stickers:
             css_class: str | None = f"sticker-{sticker['id']}"
             if css_class not in self.images:
                 css_class = None
-            stickers.append({"name": sticker["name"], "css_class": css_class})
+            result.append({"name": sticker["name"], "css_class": css_class})
+        return result
+
+    def forwarded(self, message: TicketMessage) -> dict[str, Any] | None:
+        """轉發的訊息：被轉發的內容，附件也顯示在這裡（轉發時不能另外加附件）。"""
+        if message.forwarded_from is None:
+            return None
+        content = message.forwarded_content or ""
+        return {
+            "content": self.markdown(content) if content else None,
+            "jumbo": markdown.is_jumbo_emoji(content),
+            "created_at": self.time(datetime.fromisoformat(message.forwarded_from["created_at"])),
+            "stickers": self.stickers(message.forwarded_from.get("stickers", [])),
+        }
+
+    def message(self, message: TicketMessage) -> dict[str, Any]:
+        deleted = message.deleted_at is not None
+        visible = self.staff or not deleted
         return {
             "id": message.id,
             "author": self.author(message.author_id),
@@ -413,7 +429,8 @@ class Renderer:
             "deleted": deleted,
             "content": self.markdown(message.content) if visible and message.content else None,
             "jumbo": markdown.is_jumbo_emoji(message.content),
-            "stickers": stickers,
+            "stickers": self.stickers(message.stickers or []) if visible else [],
+            "forwarded": self.forwarded(message) if visible else None,
             "attachments": [
                 self.attachment(attachment)
                 for attachment in self.transcript.attachments.get(message.id, [])
@@ -442,6 +459,7 @@ class Renderer:
             "content": self.markdown(ticket.content),
             "jumbo": markdown.is_jumbo_emoji(ticket.content),
             "stickers": [],
+            "forwarded": None,
             "attachments": [],
             "delivery_failed": False,
             "revisions": [],

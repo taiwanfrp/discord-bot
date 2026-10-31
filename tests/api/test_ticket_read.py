@@ -194,6 +194,15 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
             created_at=created_at,
             deleted_at=edited_at,
             stickers=[{"id": "301", "name": "wumpus", "format": "lottie"}],
+            # 轉發的訊息：被轉發的內容跟 content 一樣，刪除後只有客服看得到
+            forwarded_content="被轉發的內容",
+            forwarded_from={
+                "created_at": "2026-10-01T08:00:00+00:00",
+                "guild_id": "1",
+                "channel_id": "2",
+                "message_id": "3",
+                "stickers": [{"id": "302", "name": "貓", "format": "gif"}],
+            },
         )
         db.add_all([edited, deleted])
         await db.flush()
@@ -249,6 +258,7 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
     assert summary(page) == [("新的", ["kept.png"], [], [f"{stickers}/300.png"]), ("", [], [], [])]
     assert page["messages"][0]["edited_at"] is not None
     assert page["messages"][1]["deleted_at"] is not None
+    assert [m["forwarded"] for m in page["messages"]] == [None, None]
     assert (await status("kept.png")).status_code == 200
     assert (await status("removed.png")).status_code == 404
     assert (await status("deleted.png")).status_code == 404
@@ -261,6 +271,16 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
             ("新的", ["kept.png", "removed.png"], ["舊的"], [f"{stickers}/300.png"]),
             ("貼錯了", ["deleted.png"], [], [f"{stickers}/301.json"]),
         ]
+        assert page["messages"][1]["forwarded"] == {
+            "content": "被轉發的內容",
+            "created_at": "2026-10-01T08:00:00Z",
+            "guild_id": "1",
+            "channel_id": "2",
+            "message_id": "3",
+            "stickers": [
+                {"id": "302", "name": "貓", "format": "gif", "url": f"{stickers}/302.gif"}
+            ],
+        }
         [revision] = page["messages"][0]["revisions"]
         assert revision["created_at"] < revision["replaced_at"]
         assert page["messages"][0]["attachments"][1]["removed_at"] is not None

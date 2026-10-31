@@ -172,6 +172,13 @@ img, video, audio { display: block; }
 .delivery-failed { display: flex; align-items: center; gap: 0.25rem; margin: 0.25rem 0 0; font-size: 0.75rem; color: var(--error); }
 .delivery-failed .icon { width: 0.75rem; height: 0.75rem; }
 
+/* 轉發的訊息 */
+.forwarded { margin-top: 0.25rem; padding-left: 0.75rem; border-left: 4px solid var(--accented); }
+.forwarded.is-faded { opacity: 0.6; }
+.forwarded-label { display: flex; align-items: center; gap: 0.25rem; margin: 0; font-size: 0.75rem; font-style: italic; color: var(--muted); }
+.forwarded-label .icon { width: 0.875rem; height: 0.875rem; }
+.forwarded-time { margin: 0.25rem 0 0; font-size: 0.75rem; color: var(--dimmed); }
+
 /* 貼圖 */
 .stickers { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; }
 .stickers.is-deleted { text-decoration: none; }

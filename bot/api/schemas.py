@@ -366,6 +366,19 @@ class StickerOut(BaseModel):
     url: str | None = None
 
 
+class ForwardedOut(BaseModel):
+    """轉發的訊息的內容（docs/tickets.md 8.1）；附件在訊息的 attachments。"""
+
+    content: str
+    # 原訊息的時間
+    created_at: datetime
+    # 原訊息所在的伺服器、頻道與 id（可能是其他伺服器，不一定看得到）
+    guild_id: Snowflake | None
+    channel_id: Snowflake | None
+    message_id: Snowflake | None
+    stickers: list[StickerOut] = []
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -386,6 +399,8 @@ class MessageOut(BaseModel):
     stickers: Annotated[list[StickerOut], BeforeValidator(lambda value: value or [])] = []
     # 編輯前的每一版（舊的在前面），只有這張單的客服、管理員拿得到
     revisions: list[RevisionOut] = []
+    # 轉發的訊息才有，content 是轉發時另外加上的文字；被刪除的訊息跟附件一樣
+    forwarded: ForwardedOut | None = None
 
 
 class MessagePage(BaseModel):

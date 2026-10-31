@@ -39,6 +39,26 @@
 </div>
 {%- endmacro -%}
 
+{%- macro stickers(items, deleted) -%}
+<div class="stickers"{% if deleted %} style="opacity: 0.6"{% endif %}>
+	{%- for sticker in items %}
+	{%- if sticker.css_class %}
+	<span class="sticker {{ sticker.css_class }}" role="img" aria-label="{{ sticker.name }}" title="{{ sticker.name }}"></span>
+	{%- else %}
+	<span class="sticker-name">{{ icon("smile") }}貼圖：{{ sticker.name }}</span>
+	{%- endif %}
+	{%- endfor %}
+</div>
+{%- endmacro -%}
+
+{%- macro attachments(items) -%}
+<div class="attachments">
+	{%- for entry in items %}
+	{{ attachment(entry) }}
+	{%- endfor %}
+</div>
+{%- endmacro -%}
+
 {%- macro message(item) -%}
 <li class="message" id="message-{{ item.id }}">
 	<span class="avatar {{ item.author.avatar_class }}"></span>
@@ -61,22 +81,25 @@
 		<div class="content discord-md{% if item.jumbo %} is-jumbo{% endif %}{% if item.deleted %} is-deleted{% endif %}">{{ item.content }}</div>
 		{%- endif %}
 		{%- if item.stickers %}
-		<div class="stickers"{% if item.deleted %} style="opacity: 0.6"{% endif %}>
-			{%- for sticker in item.stickers %}
-			{%- if sticker.css_class %}
-			<span class="sticker {{ sticker.css_class }}" role="img" aria-label="{{ sticker.name }}" title="{{ sticker.name }}"></span>
-			{%- else %}
-			<span class="sticker-name">{{ icon("smile") }}貼圖：{{ sticker.name }}</span>
-			{%- endif %}
-			{%- endfor %}
-		</div>
+		{{ stickers(item.stickers, item.deleted) }}
 		{%- endif %}
-		{%- if item.attachments %}
-		<div class="attachments">
-			{%- for entry in item.attachments %}
-			{{ attachment(entry) }}
-			{%- endfor %}
+		{%- if item.forwarded %}
+		{#- 轉發的訊息：跟 Discord 一樣用左邊的線標出被轉發的內容，附件也在裡面 #}
+		<div class="forwarded{% if item.deleted %} is-faded{% endif %}">
+			<p class="forwarded-label">{{ icon("forward") }}已轉發</p>
+			{%- if item.forwarded.content %}
+			<div class="content discord-md{% if item.forwarded.jumbo %} is-jumbo{% endif %}">{{ item.forwarded.content }}</div>
+			{%- endif %}
+			{%- if item.forwarded.stickers %}
+			{{ stickers(item.forwarded.stickers, false) }}
+			{%- endif %}
+			{%- if item.attachments %}
+			{{ attachments(item.attachments) }}
+			{%- endif %}
+			<p class="forwarded-time">{{ time(item.forwarded.created_at) }}</p>
 		</div>
+		{%- elif item.attachments %}
+		{{ attachments(item.attachments) }}
 		{%- endif %}
 		{%- if item.delivery_failed %}
 		<p class="delivery-failed">{{ icon("warning") }}無法傳送到 Discord</p>

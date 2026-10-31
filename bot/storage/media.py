@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import re
 from collections.abc import Sequence
+from typing import Any
 
 import discord
 import filetype
@@ -45,6 +46,37 @@ def sticker_data(stickers: Sequence[discord.StickerItem]) -> list[dict[str, str]
         {"id": str(sticker.id), "name": sticker.name, "format": sticker.format.name}
         for sticker in stickers
     ] or None
+
+
+def message_attachments(message: discord.Message) -> list[discord.Attachment]:
+    """訊息的附件，加上轉發的訊息（message_snapshots）裡的附件。"""
+    attachments = list(message.attachments)
+    for snapshot in message.message_snapshots:
+        attachments += snapshot.attachments
+    return attachments
+
+
+def forwarded_data(message: discord.Message) -> tuple[str | None, dict[str, Any] | None]:
+    """轉發的訊息：被轉發的內容（存進 forwarded_content）與原訊息的資料（forwarded_from）。
+
+    轉發的訊息本身的 content、attachments、stickers 是空的，被轉發的內容在 message_snapshots；
+    轉發時另外加上的文字還是在 content。Discord 一次只能轉發一則，所以只有一個快照。
+    """
+    if not message.message_snapshots:
+        return None, None
+    snapshot = message.message_snapshots[0]
+    reference = message.reference
+
+    def snowflake(value: int | None) -> str | None:
+        return str(value) if value is not None else None
+
+    return snapshot.content, {
+        "created_at": snapshot.created_at.isoformat(),
+        "guild_id": snowflake(reference.guild_id if reference else None),
+        "channel_id": snowflake(reference.channel_id if reference else None),
+        "message_id": snowflake(reference.message_id if reference else None),
+        "stickers": sticker_data(snapshot.stickers) or [],
+    }
 
 
 def media_key(kind: MediaKind, media_id: int, extension: str) -> str:

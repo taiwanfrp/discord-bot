@@ -132,6 +132,8 @@ async def test_message_events_in_order(sessionmaker: async_sessionmaker[AsyncSes
         edited_at=None,
         attachments=[],
         stickers=[],
+        message_snapshots=[],
+        reference=None,
     )
     edited = SimpleNamespace(**{**vars(message), "content": "改過", "edited_at": created_at})
     cog = tickets_cog.Tickets(cast(commands.Bot, SimpleNamespace(user=SimpleNamespace(id=999))))

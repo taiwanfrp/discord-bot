@@ -205,10 +205,11 @@ bot 在伺服器層級需要的權限：管理頻道、管理身份組、管理 
    - 系統訊息（釘選、加入討論串等），只處理一般訊息與回覆。
    - bot 需要 **Message Content** 這個特權 intent（在 Developer Portal 開啟），否則收到的訊息內容與附件都是空的。
 2. 加密後存進 `ticket_message`，更新作者的快照（8.6）、`ticket.last_message_at`，並清除 `inactivity_reminded_at`（第 9 節）。同一則訊息重複收到時（`discord_message_id` 是唯一的）什麼都不做。貼圖存在 `stickers`，用到的自訂表情與貼圖另外存到 S3（8.7）。
+   - **轉發的訊息**：訊息本身的 `content`、`attachments`、`stickers` 是空的，被轉發的內容在 `message.message_snapshots`（Discord 一次只能轉發一則，所以只有一個快照）。被轉發的文字存在 `forwarded_content`（加密），原訊息的時間、伺服器、頻道、訊息 id 與貼圖存在 `forwarded_from`（JSON）；轉發時另外加上的文字還是存在 `content`。快照裡的附件跟一般的附件一樣處理（轉發時不能另外加附件）。網頁與匯出的檔案跟 Discord 一樣，把被轉發的內容與附件顯示在「已轉發」的區塊裡。
 3. 附件：每個附件存一筆 `ticket_attachment`，同時存下 Discord 的下載網址（`source_url`）。**一定要上傳到 S3**，因為 Discord 的附件網址大約一天就會過期。
    - 副檔名或大小不符合（8.3）：直接記錄為 `rejected`，不放入工作。
    - 符合：記錄為 `pending`，放入 worker 工作 `mirror_attachment`（下載後上傳到 S3）。
-   - worker 先用 `source_url` 下載；網址已經過期（`403`、`404`）時，才透過 REST API 重新取得訊息，拿到新的網址。訊息或頻道已經被刪除的話，記錄為 `failed`。所以傳了附件後馬上關單、頻道被刪除，附件也還來得及存下來。
+   - worker 先用 `source_url` 下載；網址已經過期（`403`、`404`）時，才透過 REST API 重新取得訊息，拿到新的網址（轉發的訊息的附件在快照裡）。訊息或頻道已經被刪除的話，記錄為 `failed`。所以傳了附件後馬上關單、頻道被刪除，附件也還來得及存下來。
    - 同一個附件用鎖確保只有一個 worker 處理。取不到鎖時（另一個 worker 正在處理，或是它當機了、鎖還沒過期）丟出例外，讓 queue 稍後重試。
    - 最後一次重試也失敗時記錄為 `failed`。
    - 放入工作失敗的附件（例如當時 Redis 連不上），由 scheduler 每 10 分鐘執行的 `requeue_pending_attachments` 重新放入。
@@ -613,6 +614,7 @@ ticket_message
   🔒content（最新的內容）, created_at, edited_at, deleted_at（被刪除時內容不清空，8.1）
   delivery_status（網頁訊息才有：pending | sent | failed）, attempts
   stickers（JSON，Discord 訊息的貼圖：id、名稱、格式，8.7）
+  forwarded_content（加密，被轉發的內容）, forwarded_from（JSON，原訊息的時間、伺服器、頻道、訊息 id 與貼圖；null 表示不是轉發的訊息，8.1）
 
 ticket_message_revision（編輯前的內容，一筆是一個舊版本，8.1）
   id, message_id, 🔒content
@@ -671,6 +673,7 @@ SQLite、MySQL、MariaDB、PostgreSQL 都用同一套程式，測試也都要能
 - 列表類的 endpoint（客服單、訊息）使用 cursor 分頁（`?before=<id>&limit=50`，`limit` 最多 100），不用 offset：訊息一直在增加，用 offset 會漏掉或重複。
   - `GET /tickets`：新的在前面，下一頁用這一頁最後一筆的 id 當作 `before`。篩選：`status`、`category_id`、`opener_id`、`claimed_by_id`、`claimed`（`false` 是還沒有人接手）、`q`（開單者的名稱，不分大小寫）。每一筆附上開單者與接手的人的快照。
   - `GET /tickets/{id}/messages`：舊的在前面。沒有指定時是最新的 `limit` 則；`before` 往前翻頁（用這一頁第一則的 id）；`after` 取得之後的訊息（收到 SSE 的 `message.created` 時）。回應的 `users` 是這些訊息的作者的快照。
+    - 轉發的訊息有 `forwarded`（被轉發的內容、原訊息的時間與 id、貼圖），附件一樣在 `attachments`。
     - 編輯過的訊息有 `edited_at`、被刪除的有 `deleted_at`。編輯前的每一版（`revisions`）、被刪除的訊息的內容與附件、編輯時移除的附件（`removed_at`），只有這張單的客服、管理員拿得到；其他人拿到的被刪除的訊息 `content` 是空的、沒有附件（8.1）。單則訊息的 API 也一樣。
   - `GET /tickets/{id}/messages/{message_id}`：單則訊息，收到 `message.updated`、`message.deleted` 時重新取得那一則。回應的格式跟列表一樣（`messages` 只有這一則），網頁可以用同一段程式合併。
 - 回傳使用者資料時用快照（8.6），頭像依照 8.6 的順序決定。`GET /tickets/{id}` 回傳這張單所有人的快照，以及額外加入的成員。

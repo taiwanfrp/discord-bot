@@ -19,7 +19,7 @@ from bot.db.models import (
 from bot.db.queries import execute_update, get_guild_settings
 from bot.db.types import utcnow
 from bot.storage.files import allowed_file_types, is_allowed_extension
-from bot.storage.media import record_media, sticker_data
+from bot.storage.media import forwarded_data, message_attachments, record_media, sticker_data
 from bot.tickets.actions import require_open
 from bot.tickets.delivery import MAX_LENGTH, max_length
 from bot.tickets.errors import TicketError
@@ -34,6 +34,7 @@ async def save_discord_message(
     回傳要放入 mirror_attachment 的附件 id。同一則訊息重複處理時（例如重新連線後
     收到重複的事件）什麼都不做。
     """
+    forwarded_content, forwarded_from = forwarded_data(message)
     saved = TicketMessage(
         ticket_id=ticket.id,
         source=Source.DISCORD,
@@ -42,6 +43,8 @@ async def save_discord_message(
         content=message.content,
         created_at=message.created_at,
         stickers=sticker_data(message.stickers),
+        forwarded_content=forwarded_content,
+        forwarded_from=forwarded_from,
     )
     db.add(saved)
     try:
@@ -58,7 +61,7 @@ async def save_discord_message(
     settings = await get_guild_settings(db)
     allowed = allowed_file_types(settings)
     attachments: list[TicketAttachment] = []
-    for attachment in message.attachments:
+    for attachment in message_attachments(message):
         # 副檔名與大小先在這裡檢查；檔案內容（magic bytes）由 worker 下載時檢查
         ok = attachment.size <= settings.max_attachment_size and is_allowed_extension(
             attachment.filename, allowed
@@ -87,7 +90,8 @@ async def save_discord_message(
         )
     )
     await db.commit()
-    await record_media(db, message.content, saved.stickers)
+    stickers = [*(saved.stickers or []), *(forwarded_from or {}).get("stickers", [])]
+    await record_media(db, f"{message.content}\n{forwarded_content or ''}", stickers)
     return [a.id for a in attachments if a.status is AttachmentStatus.PENDING]
 
 
@@ -115,7 +119,7 @@ async def edit_discord_message(db: AsyncSession, message: discord.Message) -> No
                 TicketAttachment.message_id == saved.id,
                 TicketAttachment.removed_at.is_(None),
                 TicketAttachment.discord_attachment_id.not_in(
-                    [attachment.id for attachment in message.attachments]
+                    [attachment.id for attachment in message_attachments(message)]
                 ),
             )
         )

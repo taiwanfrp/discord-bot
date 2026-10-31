@@ -197,6 +197,11 @@ class TicketMessage(Base):
     attempts: Mapped[int] = mapped_column(default=0)
     # Discord 訊息的貼圖：[{"id": "...", "name": "...", "format": "png"}]（docs/tickets.md 8.7）
     stickers: Mapped[list[dict[str, str]] | None] = mapped_column(JSON(none_as_null=True))
+    # 轉發的訊息（docs/tickets.md 8.1）：被轉發的內容；content 是轉發時另外加上的文字
+    forwarded_content: Mapped[str | None] = mapped_column(EncryptedText)
+    # 原訊息的時間、伺服器、頻道、訊息 id 與貼圖：{"created_at": "...", "guild_id": "...",
+    # "channel_id": "...", "message_id": "...", "stickers": [...]}；null 表示不是轉發的訊息
+    forwarded_from: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True))
 
 
 class TicketMessageRevision(Base):
