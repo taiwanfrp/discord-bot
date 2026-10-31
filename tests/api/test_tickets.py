@@ -5,6 +5,7 @@ import discord
 from sqlalchemy import select, text
 
 from bot.db.models import Ticket, TicketEvent, TicketStatus, TicketUser
+from bot.tickets import open as open_module
 from tests.api.helpers import USER_ID, Env, make_category_channel, make_role
 
 
@@ -79,6 +80,39 @@ async def test_open_as_member(env: Env) -> None:
         )
         event = await db.scalar(select(TicketEvent))
         assert event is not None and event.type == "ticket.created"
+
+
+async def test_long_content_is_split(env: Env) -> None:
+    """embed 只放內容的開頭，剩下的接在後面送出（Discord 對訊息的大小有上限）。"""
+    category_id = await setup_category(env)
+    content = ("中" * 900 + "\n") * 4 + "@everyone"
+    response = await env.post(
+        "/tickets", {"category_id": category_id, "subject": "主" * 100, "content": content}
+    )
+    assert response.status_code == 201, response.json()
+
+    channel = env.guild.created_channels[0]
+    first, *rest = channel.send.call_args_list
+    description = first.kwargs["embed"].description
+    assert len(description) <= open_module.EMBED_CONTENT_LIMIT
+    assert description == "中" * 900 + open_module.CONTINUED
+    chunks = [call.args[0] for call in rest]
+    assert all(len(chunk) <= open_module.MESSAGE_LIMIT for chunk in chunks)
+    line = "中" * 900
+    assert chunks == [f"{line}\n{line}", f"{line}\n@everyone"]
+    assert all(call.kwargs["allowed_mentions"].everyone is False for call in rest)
+    async with env.sessionmaker() as db:
+        # 資料庫裡是完整的內容
+        assert (await db.get_one(Ticket, response.json()["id"])).content == content
+
+
+def test_split_content_without_newlines() -> None:
+    head, rest = open_module.split_content("a" * 5000)
+    assert head.endswith(open_module.CONTINUED)
+    assert "".join([head.removesuffix(open_module.CONTINUED), *rest]) == "a" * 5000
+    first = len(head) - len(open_module.CONTINUED)
+    assert [len(chunk) for chunk in rest] == [2000, 2000, 5000 - 4000 - first]
+    assert open_module.split_content("短的") == ("短的", [])
 
 
 async def test_open_when_not_in_guild(env: Env) -> None:

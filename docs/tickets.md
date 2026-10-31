@@ -140,6 +140,7 @@ flowchart TD
 3. 依照頻道名稱格式，在目標類別底下建立私人頻道，並設定權限。
 4. 在頻道裡建立 webhook，存進資料庫。
 5. 送出 embed（分類、主旨、內容、開單者、時間、來源）與三個按鈕。
+   - embed 只放內容的前 1000 字，剩下的用一般訊息（每則最多 2000 字，盡量在換行切開）接在後面送出，`@everyone` 等不通知。Discord 對一則訊息的大小有沒公開的上限，雖然沒超過 embed 的字數限制，主旨 100 字加內容 4000 字的中文還是會被拒絕（`413`，錯誤碼 40005）。實測跟 JSON 的寫法無關（用 orjson 送出 UTF-8 也一樣）。
 6. 失敗時：刪除已建立的頻道，客服單標記為 `failed`，回覆使用者錯誤訊息。
 
 - **從 Discord 開單時，要先 defer**：Discord 規定 interaction 必須在 3 秒內回應，而建立頻道、webhook 加起來很可能超過 3 秒。所以 Modal 送出後，先用 `interaction.response.defer(ephemeral=True)` 回應，完成後再用 followup 告訴使用者頻道在哪裡。

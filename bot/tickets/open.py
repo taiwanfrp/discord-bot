@@ -32,6 +32,14 @@ from bot.tickets.snapshot import update_snapshot
 
 log = logging.getLogger(__name__)
 
+# 開單訊息的 embed 只放內容的開頭，剩下的用一般訊息接在後面送出（docs/tickets.md 5.3）。
+# Discord 對訊息的大小有沒公開的上限：主旨 100 字加內容 4000 字的中文就會被拒絕（413），
+# 雖然都沒超過 embed 的字數限制
+EMBED_CONTENT_LIMIT = 1000
+# 一般訊息的字數上限
+MESSAGE_LIMIT = 2000
+CONTINUED = "\n…（接下一則訊息）"
+
 
 async def open_ticket(
     db: AsyncSession,
@@ -87,14 +95,18 @@ async def open_ticket(
         await db.commit()
 
         banned = member is None and await is_banned(guild, opener)
+        head, rest = split_content(ticket.content)
         message = await channel.send(
             content=member.mention if member else None,
             embed=ticket_embed(
-                ticket, category, opener, in_guild=member is not None, banned=banned
+                ticket, category, opener, in_guild=member is not None, banned=banned, content=head
             ),
             view=TicketControlsView(claimed=False),
             allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
         )
+        for chunk in rest:
+            # 使用者寫的內容：@everyone 等只顯示、不通知
+            await channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
     except Exception as error:
         log.exception("Failed to set up ticket %d", ticket.id)
         if channel is not None:
@@ -196,6 +208,28 @@ async def is_banned(guild: discord.Guild, user: discord.abc.Snowflake) -> bool:
     return True
 
 
+def split_content(content: str) -> tuple[str, list[str]]:
+    """開單內容分成 embed 裡的開頭，以及接在後面的一般訊息。"""
+    if len(content) <= EMBED_CONTENT_LIMIT:
+        return content, []
+    head, rest = cut(content, EMBED_CONTENT_LIMIT - len(CONTINUED))
+    chunks: list[str] = []
+    while rest:
+        chunk, rest = cut(rest, MESSAGE_LIMIT)
+        chunks.append(chunk)
+    return head + CONTINUED, chunks
+
+
+def cut(text: str, limit: int) -> tuple[str, str]:
+    """切成不超過 limit 個字的前半段與剩下的部分，盡量在換行切開。"""
+    if len(text) <= limit:
+        return text, ""
+    index = text.rfind("\n", limit // 2, limit)
+    if index == -1:
+        index = limit
+    return text[:index], text[index:].lstrip("\n")
+
+
 def ticket_embed(
     ticket: Ticket,
     category: TicketCategory,
@@ -203,10 +237,11 @@ def ticket_embed(
     *,
     in_guild: bool,
     banned: bool,
+    content: str,
 ) -> discord.Embed:
     embed = discord.Embed(
         title=f"#{ticket.id} {ticket.subject}"[:256],
-        description=ticket.content,
+        description=content,
         color=discord.Color.blurple(),
         timestamp=ticket.created_at,
     )
