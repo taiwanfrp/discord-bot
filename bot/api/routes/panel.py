@@ -11,7 +11,7 @@ from bot.db.models import TicketCategory
 from bot.db.queries import get_guild_settings
 from bot.tickets.panel import MAX_CATEGORIES, PanelView, panel_embed
 
-router = APIRouter(prefix="/panel")
+router = APIRouter(prefix="/panel", tags=["Panel"])
 
 
 @router.post("/publish")

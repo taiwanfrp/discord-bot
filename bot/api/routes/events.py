@@ -24,7 +24,7 @@ from bot.api.sse import LIST_EVENT_PREFIX, EventHub
 from bot.db.models import Ticket, TicketEvent
 from bot.tickets.actions import can_view
 
-router = APIRouter()
+router = APIRouter(tags=["Events"])
 
 # 每隔多久重新驗證一次 session 與權限（docs/auth.md 3.2）
 REVALIDATE_INTERVAL = 60.0

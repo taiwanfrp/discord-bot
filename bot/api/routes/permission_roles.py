@@ -12,7 +12,7 @@ from bot.worker.tasks import sync_ticket_permissions
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/permission-roles")
+router = APIRouter(prefix="/permission-roles", tags=["Permission-Roles"])
 
 
 async def load(db: DBDep) -> PermissionRoles:
@@ -34,6 +34,7 @@ async def load(db: DBDep) -> PermissionRoles:
 
 @router.get("")
 async def get_permission_roles(_: AdminDep, db: DBDep) -> PermissionRoles:
+    """管理員與各分類客服的身份組，需要管理員。"""
     return await load(db)
 
 
@@ -41,6 +42,7 @@ async def get_permission_roles(_: AdminDep, db: DBDep) -> PermissionRoles:
 async def replace_permission_roles(
     body: PermissionRoles, _: AdminDep, guild: GuildDep, db: DBDep
 ) -> PermissionRoles:
+    """整份取代管理員與各分類客服的身份組，需要管理員；開啟中的客服單頻道權限會在背景更新。"""
     category_ids = set(await db.scalars(select(TicketCategory.id)))
     rows: list[PermissionRole] = []
     # 用 dict 去除重複：category_id 是 null 時，資料庫的唯一限制不會生效

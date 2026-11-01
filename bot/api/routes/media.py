@@ -10,7 +10,7 @@ from bot.db.models import AttachmentStatus, DiscordMedia, MediaKind
 from bot.storage.media import discord_url
 from bot.storage.share import media_url
 
-router = APIRouter()
+router = APIRouter(tags=["Media"])
 
 # 每個 IP 每分鐘最多幾次；一頁訊息裡可能有很多不同的表情
 RATE_LIMIT = 600

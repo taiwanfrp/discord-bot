@@ -6,14 +6,15 @@ from bot.api.ratelimit import allow, client_ip
 from bot.db.models import TicketAttachment
 from bot.storage.share import is_shared, presign_download
 
-router = APIRouter()
+router = APIRouter(tags=["Share"])
 
 # 每個 IP 每分鐘最多幾次
 RATE_LIMIT = 60
 
 
-# Discord 抓取預覽時可能先送 HEAD
-@router.api_route("/a/{attachment_id}/{token}", methods=["GET", "HEAD"], status_code=302)
+# Discord 抓取預覽時可能先送 HEAD；HEAD 不列進 /docs，不然兩個會用到同一個 operation id
+@router.get("/a/{attachment_id}/{token}", status_code=302)
+@router.head("/a/{attachment_id}/{token}", status_code=302, include_in_schema=False)
 async def open_shared(
     attachment_id: int, token: str, request: Request, db: DBDep, redis: RedisDep, s3: S3Dep
 ) -> RedirectResponse:

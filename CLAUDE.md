@@ -100,7 +100,7 @@ compose.dev.yaml     # 本機開發用的 Redis、Silo，以及測試用的資�
 - Discord ID 在 JSON 裡一律用字串（snowflake 超過 JavaScript 的安全整數範圍）。
 - 會修改資料的請求要檢查 `Origin`，並且只接受 `application/json`。
 - 權限一律在 bot 端判斷，不能相信前端送來的身分或角色資料。
-- route 放在 `bot/api/routes/`，用 `bot/api/deps.py` 的 dependency 取得資料：`ViewerDep`（需要登入）、`AdminDep`（只有管理員）、`GuildDep`、`DBDep`、`RedisDep`、`S3Dep`（bot 啟動時建立的 S3 client）。不要在 route 裡直接呼叫 `get_redis()`、`s3_client()` 等函式，測試才能替換。
+- route 放在 `bot/api/routes/`，每個 router 要設定 `tags`（`/docs` 依照它分組，跟主要 API 一樣用首字大寫的英文，例如 `Tickets`），每個 route 的 docstring 會成為 `/docs` 裡的說明。route 用 `bot/api/deps.py` 的 dependency 取得資料：`ViewerDep`（需要登入）、`AdminDep`（只有管理員）、`GuildDep`、`DBDep`、`RedisDep`、`S3Dep`（bot 啟動時建立的 S3 client）。不要在 route 裡直接呼叫 `get_redis()`、`s3_client()` 等函式，測試才能替換。
 - 客服單的流程寫在 `bot/tickets/`，Discord 與 API 共用；要讓使用者看到的錯誤丟出 `bot.tickets.open.TicketError(訊息, status_code)`，API 轉成 HTTP 錯誤，Discord 回覆訊息。
 - 權限用 `viewer.access`（`bot.core.permissions.Access`）：`is_admin`、`is_staff(category_id)`。開單者的判斷是 `viewer.id == ticket.opener_id`。
 - 被刪除的訊息（`deleted_at`）、編輯前的內容（`ticket_message_revision`）、編輯時移除的附件（`removed_at`），網頁上只有這張單的客服、管理員看得到（`is_staff(ticket.category_id)`）。新增讀取訊息或附件的地方（例如匯出）時要一樣處理。

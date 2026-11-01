@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import tomllib
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import uvicorn
@@ -33,10 +35,17 @@ from bot.core.config import get_settings
 if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client
 
+with (Path(__file__).parents[2] / "pyproject.toml").open("rb") as file:
+    PROJECT = tomllib.load(file)["project"]
+
 
 def create_app(bot: commands.Bot, event_hub: EventHub, s3: S3Client) -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="TaiwanFRP Ticket Bot")
+    app = FastAPI(
+        title=PROJECT["app_name"],
+        version=PROJECT["version"],
+        description=PROJECT["description"],
+    )
     app.state.bot = bot
     app.state.event_hub = event_hub
     app.state.s3 = s3
@@ -72,8 +81,9 @@ def create_app(bot: commands.Bot, event_hub: EventHub, s3: S3Client) -> FastAPI:
     ):
         app.include_router(module.router)
 
-    @app.get("/health")
+    @app.get("/health", tags=["system"])
     async def health(bot: BotDep) -> dict[str, bool]:
+        """健康檢查，discord_ready 是 bot 是否已經連上 Discord。"""
         return {"ok": True, "discord_ready": bot.is_ready()}
 
     return app

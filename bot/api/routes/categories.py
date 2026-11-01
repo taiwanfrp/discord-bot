@@ -6,7 +6,7 @@ from bot.api.guild_utils import require_category_channel, validate_emoji
 from bot.api.schemas import CategoryIn, CategoryOut, CategoryPatch
 from bot.db.models import Ticket, TicketCategory
 
-router = APIRouter(prefix="/categories")
+router = APIRouter(prefix="/categories", tags=["Categories"])
 
 
 async def get_category(db: DBDep, category_id: int) -> TicketCategory:
@@ -34,6 +34,7 @@ async def list_categories(viewer: ViewerDep, db: DBDep) -> list[CategoryOut]:
 
 @router.post("", status_code=201)
 async def create_category(body: CategoryIn, _: AdminDep, guild: GuildDep, db: DBDep) -> CategoryOut:
+    """建立分類，需要管理員。"""
     validate_category(body, guild)
     category = TicketCategory(**body.model_dump())
     db.add(category)
@@ -45,6 +46,7 @@ async def create_category(body: CategoryIn, _: AdminDep, guild: GuildDep, db: DB
 async def update_category(
     category_id: int, body: CategoryPatch, _: AdminDep, guild: GuildDep, db: DBDep
 ) -> CategoryOut:
+    """修改分類，需要管理員。"""
     validate_category(body, guild)
     category = await get_category(db, category_id)
     for name, value in body.model_dump(exclude_unset=True).items():
@@ -55,6 +57,7 @@ async def update_category(
 
 @router.delete("/{category_id}", status_code=204)
 async def delete_category(category_id: int, _: AdminDep, db: DBDep) -> None:
+    """刪除分類，需要管理員；已經有客服單的分類只能停用。"""
     category = await get_category(db, category_id)
     # 客服單紀錄還要顯示分類，所以有客服單的分類只能停用
     if await db.scalar(select(exists().where(Ticket.category_id == category_id))):

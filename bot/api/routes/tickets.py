@@ -26,7 +26,7 @@ from bot.tickets import actions
 from bot.tickets.errors import TicketError
 from bot.tickets.open import open_ticket
 
-router = APIRouter(prefix="/tickets")
+router = APIRouter(prefix="/tickets", tags=["Tickets"])
 
 
 @contextmanager
@@ -168,6 +168,7 @@ async def create_ticket(
 
 @router.post("/{ticket_id}/claim")
 async def claim(ticket_id: int, viewer: ViewerDep, guild: GuildDep, db: DBDep) -> TicketOut:
+    """接手客服單，只有這個分類的客服可以；已經有人接手時要用轉交。"""
     ticket = await visible_ticket(db, viewer, ticket_id)
     with ticket_errors():
         await actions.claim(db, guild, ticket, require_member(viewer))
@@ -176,6 +177,7 @@ async def claim(ticket_id: int, viewer: ViewerDep, guild: GuildDep, db: DBDep) -
 
 @router.post("/{ticket_id}/unclaim")
 async def unclaim(ticket_id: int, viewer: ViewerDep, guild: GuildDep, db: DBDep) -> TicketOut:
+    """釋放客服單，只有目前接手的人和管理員可以。"""
     ticket = await visible_ticket(db, viewer, ticket_id)
     with ticket_errors():
         await actions.unclaim(db, guild, ticket, require_member(viewer))
@@ -186,6 +188,7 @@ async def unclaim(ticket_id: int, viewer: ViewerDep, guild: GuildDep, db: DBDep)
 async def transfer(
     ticket_id: int, body: UserIdIn, viewer: ViewerDep, guild: GuildDep, db: DBDep
 ) -> TicketOut:
+    """轉交給同一個分類的客服或管理員，只有目前接手的人和管理員可以；管理員也可以直接指派還沒有人接手的單。"""
     ticket = await visible_ticket(db, viewer, ticket_id)
     target = require_target(guild, body.user_id)
     with ticket_errors():
@@ -197,6 +200,7 @@ async def transfer(
 async def close(
     ticket_id: int, body: CloseIn, viewer: ViewerDep, guild: GuildDep, db: DBDep
 ) -> TicketOut:
+    """關單，開單者和這個分類的客服可以（docs/tickets.md 第 10 節）。"""
     ticket = await visible_ticket(db, viewer, ticket_id)
     with ticket_errors():
         await actions.close(db, guild, ticket, viewer.member or viewer.user, body.reason)
@@ -207,6 +211,7 @@ async def close(
 async def add_member(
     ticket_id: int, body: UserIdIn, viewer: ViewerDep, guild: GuildDep, db: DBDep
 ) -> None:
+    """把其他人加進客服單，開單者和這個分類的客服可以。"""
     ticket = await visible_ticket(db, viewer, ticket_id)
     target = require_target(guild, body.user_id)
     with ticket_errors():
@@ -217,6 +222,7 @@ async def add_member(
 async def remove_member(
     ticket_id: int, user_id: int, viewer: ViewerDep, bot: BotDep, guild: GuildDep, db: DBDep
 ) -> None:
+    """把額外加入的成員移出客服單，開單者和這個分類的客服可以；已經離開伺服器的人也能移除。"""
     ticket = await visible_ticket(db, viewer, ticket_id)
     # 已經離開伺服器的人也要能移除
     with ticket_errors():

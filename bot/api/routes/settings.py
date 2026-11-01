@@ -5,11 +5,12 @@ from bot.api.guild_utils import require_category_channel, require_text_channel
 from bot.api.schemas import SettingsOut, SettingsPatch
 from bot.db.queries import get_guild_settings
 
-router = APIRouter(prefix="/settings")
+router = APIRouter(prefix="/settings", tags=["Settings"])
 
 
 @router.get("")
 async def get_settings(_: AdminDep, db: DBDep) -> SettingsOut:
+    """伺服器的設定，需要管理員。"""
     settings = await get_guild_settings(db)
     await db.commit()
     return SettingsOut.model_validate(settings)
@@ -19,6 +20,7 @@ async def get_settings(_: AdminDep, db: DBDep) -> SettingsOut:
 async def update_settings(
     body: SettingsPatch, _: AdminDep, guild: GuildDep, db: DBDep
 ) -> SettingsOut:
+    """修改伺服器的設定，需要管理員。"""
     if body.log_channel_id is not None:
         require_text_channel(guild, body.log_channel_id)
     if body.default_discord_category_id is not None:

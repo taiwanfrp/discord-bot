@@ -17,7 +17,7 @@ from bot.worker.tasks import export_ticket
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["Exports"])
 
 # 每個人每小時最多匯出幾次：有大附件的單，每次都會在 S3 多一份完整的 ZIP（保留 24 小時）
 RATE_LIMIT = 10

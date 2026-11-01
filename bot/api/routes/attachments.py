@@ -14,7 +14,7 @@ from bot.worker.tasks import verify_attachment
 
 log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["Attachments"])
 
 
 async def own_attachment(db: AsyncSession, viewer: Viewer, attachment_id: int) -> TicketAttachment:

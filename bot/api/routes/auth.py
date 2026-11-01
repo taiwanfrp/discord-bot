@@ -20,7 +20,7 @@ from bot.api.schemas import ExchangeIn, MeOut
 from bot.core.config import get_settings
 from bot.db.types import utcnow
 
-router = APIRouter()
+router = APIRouter(tags=["Auth"])
 
 
 def me_out(viewer: Viewer) -> MeOut:
@@ -92,6 +92,7 @@ async def exchange(
 
 @router.post("/auth/logout", status_code=204)
 async def logout(request: Request, response: Response, redis: RedisDep) -> None:
+    """登出：刪除 bot 的 session 和 cookie，不影響主要 API 的 session。"""
     settings = get_settings()
     token = request.cookies.get(settings.auth_cookie_name)
     if token:
@@ -106,4 +107,5 @@ async def logout(request: Request, response: Response, redis: RedisDep) -> None:
 
 @router.get("/me")
 async def me(viewer: ViewerDep) -> MeOut:
+    """目前登入的人：名稱、頭像、是否在伺服器裡，以及管理員與客服的權限。"""
     return me_out(viewer)

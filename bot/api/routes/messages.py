@@ -15,7 +15,7 @@ from bot.worker.tasks import deliver_messages
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/tickets")
+router = APIRouter(prefix="/tickets", tags=["Messages"])
 
 
 @router.get("/{ticket_id}/messages")

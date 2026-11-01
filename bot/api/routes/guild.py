@@ -7,7 +7,7 @@ from bot.api.guild_utils import audit_reason, discord_errors, require_editable_r
 from bot.api.schemas import ChannelOut, RoleIn, RoleOut, RolePatch
 from bot.db.models import PermissionRole
 
-router = APIRouter(prefix="/guild")
+router = APIRouter(prefix="/guild", tags=["Guild"])
 
 
 def role_out(role: discord.Role) -> RoleOut:
@@ -25,6 +25,7 @@ def role_out(role: discord.Role) -> RoleOut:
 
 @router.get("/channels")
 async def list_channels(_: AdminDep, guild: GuildDep) -> list[ChannelOut]:
+    """伺服器的文字頻道與類別，需要管理員（設定紀錄頻道、分類要放在哪個類別時使用）。"""
     return [
         ChannelOut(
             id=channel.id,
@@ -40,6 +41,7 @@ async def list_channels(_: AdminDep, guild: GuildDep) -> list[ChannelOut]:
 
 @router.get("/roles")
 async def list_roles(_: AdminDep, guild: GuildDep) -> list[RoleOut]:
+    """伺服器的身份組（不含 @everyone），需要管理員。"""
     return [role_out(role) for role in guild.roles if not role.is_default()]
 
 
@@ -59,6 +61,7 @@ async def create_role(body: RoleIn, viewer: AdminDep, guild: GuildDep) -> RoleOu
 
 @router.patch("/roles/{role_id}")
 async def update_role(role_id: int, body: RolePatch, viewer: AdminDep, guild: GuildDep) -> RoleOut:
+    """修改 Discord 的身份組，需要管理員；只能修改 bot 管得到的身份組。"""
     role = require_editable_role(guild, role_id)
     changes = body.model_dump(exclude_unset=True)
     if "color" in changes:
@@ -71,6 +74,7 @@ async def update_role(role_id: int, body: RolePatch, viewer: AdminDep, guild: Gu
 
 @router.delete("/roles/{role_id}", status_code=204)
 async def delete_role(role_id: int, viewer: AdminDep, guild: GuildDep, db: DBDep) -> None:
+    """刪除 Discord 的身份組，需要管理員；同時移除它的用途設定。"""
     role = require_editable_role(guild, role_id)
     with discord_errors():
         await role.delete(reason=audit_reason(viewer))
