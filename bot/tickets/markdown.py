@@ -6,7 +6,7 @@
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from markdown_it import MarkdownIt
@@ -130,6 +130,9 @@ def _spoiler(state: StateInline, silent: bool) -> bool:
 md.inline.ruler.before("emphasis", "discord_spoiler", _spoiler)
 
 TIMESTAMP_PATTERN = re.compile(r"<t:(-?\d{1,13})(?::([tTdDfFR]))?>")
+# 匯出的時差最多 ±14 小時（ExportIn.utc_offset），換算成觀看者的時區後還要在 datetime 的範圍內
+TIMESTAMP_MIN = datetime.min.replace(tzinfo=UTC) + timedelta(hours=14)
+TIMESTAMP_MAX = datetime.max.replace(tzinfo=UTC) - timedelta(hours=14)
 WEEKDAYS = "一二三四五六日"
 
 
@@ -179,6 +182,9 @@ def _timestamp(state: StateInline, silent: bool) -> bool:
     try:
         value = datetime.fromtimestamp(int(match[1]), UTC)
     except (OverflowError, OSError, ValueError):
+        return False
+    # 超出範圍的照原樣顯示（例如 <t:253402300799> 換算成 +8 會超過 9999 年）
+    if not TIMESTAMP_MIN <= value <= TIMESTAMP_MAX:
         return False
     if not silent:
         token = state.push("discord_timestamp", "time", 0)

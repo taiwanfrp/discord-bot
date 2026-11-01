@@ -56,6 +56,16 @@ def test_timestamps() -> None:
     assert 'datetime="2026-10-28T14:00:00+08:00"' in html
 
 
+@pytest.mark.parametrize("offset", [-720, -60, 0, 480, 840])
+@pytest.mark.parametrize("seconds", [253402300799, -62135596800])
+def test_timestamp_out_of_range(offset: int, seconds: int) -> None:
+    """datetime 範圍邊緣的時間戳換算時區後會溢位，照原樣顯示，不能讓匯出失敗。"""
+    html = render(
+        f"<t:{seconds}>", Env(**{**vars(env()), "tz": timezone(timedelta(minutes=offset))})
+    )
+    assert f"&lt;t:{seconds}&gt;" in html
+
+
 @pytest.mark.parametrize(
     ("text", "jumbo"),
     [
