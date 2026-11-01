@@ -18,6 +18,7 @@ from bot.db.models import Ticket, TicketAttachment, TicketMessage, TicketUser
 from bot.storage.media import sticker_url
 from bot.storage.share import avatar_url, download_url
 from bot.tickets.history import visible_attachments, visible_revisions
+from bot.tickets.markdown import USER_MENTION
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,16 +60,25 @@ async def message_page(
         message_id: [RevisionOut.model_validate(revision) for revision in rows]
         for message_id, rows in (await visible_revisions(db, messages, staff=staff)).items()
     }
-    authors = await db.scalars(
+    # 作者與內容裡被 tag 的人（<@id>）；看不到內容的訊息不算
+    texts = [
+        text
+        for message in messages
+        if message.deleted_at is None or staff
+        for text in (message.content, message.forwarded_content or "")
+    ] + [revision.content for rows in revisions.values() for revision in rows]
+    user_ids = {message.author_id for message in messages} | {
+        int(match[1]) for text in texts for match in USER_MENTION.finditer(text)
+    }
+    users = await db.scalars(
         select(TicketUser).where(
-            TicketUser.ticket_id == ticket.id,
-            TicketUser.user_id.in_({message.author_id for message in messages}),
+            TicketUser.ticket_id == ticket.id, TicketUser.user_id.in_(user_ids)
         )
     )
 
     page = MessagePage(
         messages=[MessageOut.model_validate(message) for message in messages],
-        users=[await user_out(s3, row) for row in authors],
+        users=[await user_out(s3, row) for row in users],
     )
     by_id = {message.id: message for message in messages}
     for out in page.messages:

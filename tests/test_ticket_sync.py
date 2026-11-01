@@ -133,6 +133,7 @@ async def test_message_events_in_order(sessionmaker: async_sessionmaker[AsyncSes
         attachments=[],
         stickers=[],
         message_snapshots=[],
+        mentions=[],
         reference=None,
     )
     edited = SimpleNamespace(**{**vars(message), "content": "改過", "edited_at": created_at})

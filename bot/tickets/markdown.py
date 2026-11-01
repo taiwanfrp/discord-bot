@@ -228,7 +228,7 @@ USER_MENTION = re.compile(r"<@!?(\d{15,21})>")
 
 
 def _mention(state: StateInline, silent: bool) -> bool:
-    """<@id>：網頁上照原樣顯示；匯出時有快照的人換成名稱。"""
+    """<@id>：有快照的人（作者與被 tag 的人）換成名稱，沒有的照原樣顯示。"""
     match = USER_MENTION.match(state.src, state.pos, state.posMax)
     if match is None:
         return False

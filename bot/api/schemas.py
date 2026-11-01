@@ -406,7 +406,7 @@ class MessageOut(BaseModel):
 class MessagePage(BaseModel):
     # 舊的在前面
     messages: list[MessageOut]
-    # 這些訊息的作者的快照
+    # 這些訊息的作者與內容裡被 tag 的人（<@id>）的快照
     users: list[UserOut]
 
 

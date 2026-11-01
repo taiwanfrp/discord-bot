@@ -26,6 +26,12 @@ from bot.tickets.errors import TicketError
 from bot.tickets.snapshot import update_snapshot
 
 
+async def snapshot_mentions(db: AsyncSession, ticket_id: int, message: discord.Message) -> None:
+    """被 tag 的人也存快照，網頁和匯出才能把 <@id> 顯示成名稱。"""
+    for user in message.mentions:
+        await update_snapshot(db, ticket_id, user)
+
+
 async def save_discord_message(
     db: AsyncSession, ticket: Ticket, message: discord.Message
 ) -> list[int]:
@@ -54,6 +60,7 @@ async def save_discord_message(
         return []
 
     await update_snapshot(db, ticket.id, message.author)
+    await snapshot_mentions(db, ticket.id, message)
     ticket.last_message_at = message.created_at
     # 有新訊息就重新計算閒置時間（docs/tickets.md 第 9 節）
     ticket.inactivity_reminded_at = None
@@ -142,6 +149,7 @@ async def edit_discord_message(db: AsyncSession, message: discord.Message) -> No
     for attachment in removed:
         attachment.removed_at = edited_at
     await update_snapshot(db, saved.ticket_id, message.author)
+    await snapshot_mentions(db, saved.ticket_id, message)
     db.add(
         TicketEvent(
             ticket_id=saved.ticket_id,

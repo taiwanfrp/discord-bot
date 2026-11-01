@@ -63,6 +63,7 @@ def make_message(
     edited_at: datetime | None = None,
     stickers: list[Any] | None = None,
     snapshots: list[Any] | None = None,
+    mentions: list[Any] | None = None,
 ) -> discord.Message:
     return cast(
         discord.Message,
@@ -75,6 +76,7 @@ def make_message(
             attachments=attachments,
             stickers=stickers or [],
             message_snapshots=snapshots or [],
+            mentions=mentions or [],
             reference=SimpleNamespace(guild_id=1, channel_id=2, message_id=3)
             if snapshots
             else None,
@@ -250,6 +252,22 @@ async def test_edit_message(db: AsyncSession) -> None:
         ("message.updated", 5),
         ("message.updated", 5),
     ]
+
+
+async def test_mentioned_users_are_snapshotted(db: AsyncSession) -> None:
+    """被 tag 的人也存快照，網頁和匯出才能顯示名稱；編輯後新 tag 的人也一樣。"""
+    ticket = await make_ticket(db)
+    await save_discord_message(
+        db, ticket, make_message(100, [], "<@6> 請看", mentions=[make_member(6, [])])
+    )
+    await edit_discord_message(
+        db,
+        make_message(
+            100, [], "<@6> <@7> 請看", CREATED_AT, mentions=[make_member(6, []), make_member(7, [])]
+        ),
+    )
+    users = await db.scalars(select(TicketUser.user_id).order_by(TicketUser.user_id))
+    assert list(users) == [5, 6, 7]
 
 
 async def test_edit_without_changes_is_ignored(db: AsyncSession) -> None:

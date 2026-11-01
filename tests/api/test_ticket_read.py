@@ -169,6 +169,40 @@ async def test_messages(env: Env) -> None:
     assert (await env.client.get(url)).status_code == 404
 
 
+async def test_mentioned_users(env: Env) -> None:
+    """訊息裡被 tag 的人（<@id>）的快照也一起回傳；被刪除的訊息只有客服看得到。"""
+    ticket_id, _ = await open_ticket(env)
+    async with env.sessionmaker() as db:
+        for user_id in (STAFF, OTHER):
+            db.add(TicketUser(ticket_id=ticket_id, user_id=user_id, username=f"user{user_id}"))
+        db.add_all(
+            [
+                TicketMessage(
+                    ticket_id=ticket_id,
+                    source=Source.DISCORD,
+                    author_id=OPENER,
+                    content=f"<@{STAFF}> 請看",
+                    created_at=datetime(2026, 10, 24, 12, 0, tzinfo=UTC),
+                ),
+                TicketMessage(
+                    ticket_id=ticket_id,
+                    source=Source.DISCORD,
+                    author_id=OPENER,
+                    content=f"<@!{OTHER}> 貼錯了",
+                    created_at=datetime(2026, 10, 24, 12, 1, tzinfo=UTC),
+                    deleted_at=datetime(2026, 10, 24, 12, 2, tzinfo=UTC),
+                ),
+            ]
+        )
+        await db.commit()
+
+    page = await messages(env, ticket_id)
+    assert {u["id"] for u in page["users"]} == {str(OPENER), str(STAFF)}
+    await login_as(env, STAFF)
+    page = await messages(env, ticket_id)
+    assert {u["id"] for u in page["users"]} == {str(OPENER), str(STAFF), str(OTHER)}
+
+
 async def test_edited_and_deleted_messages(env: Env) -> None:
     """被刪除的訊息、編輯前的內容、編輯時移除的附件，只有這張單的客服、管理員看得到。"""
     ticket_id, _ = await open_ticket(env)
