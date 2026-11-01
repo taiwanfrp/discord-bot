@@ -15,6 +15,8 @@ def env() -> Env:
         now=NOW,
         emoji=lambda emoji_id, name, animated: f"[{emoji_id}:{name}:{animated}]",
         user_name=lambda user_id: "小明" if user_id == USER else None,
+        role=lambda role_id: ("客服", 0xFF0000) if role_id == USER else None,
+        channel_name=lambda channel_id: "公告" if channel_id == USER else None,
     )
 
 
@@ -31,6 +33,8 @@ def env() -> Env:
         ("#### 四層", "<p>#### 四層</p>"),
         ("<a:_Gura:983318658476552222>", "[983318658476552222:_Gura:True]"),
         (f"<@{USER}> <@!999999999999999999>", '<span class="md-mention">@小明</span> &lt;@!999'),
+        (f"<@&{USER}>", '<span class="md-mention" style="--mention-color: #ff0000">@客服</span>'),
+        (f"<#{USER}> <#999999999999999999>", '<span class="md-mention">#公告</span> &lt;#999'),
         ("`<:a_b:983318658476552222>`", "<code>&lt;:a_b:983318658476552222&gt;</code>"),
         ("www.example.com", "<p>www.example.com</p>"),
         ("https://a.test", '<a href="https://a.test" target="_blank" rel="noopener noreferrer">'),

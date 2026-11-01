@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.api.deps import BotDep, DBDep, GuildDep, RedisDep, S3Dep, Viewer, ViewerDep
 from bot.api.guild_utils import discord_errors
-from bot.api.output import user_out
+from bot.api.output import guild_mentions, user_out
 from bot.api.schemas import (
     CloseIn,
     MemberOut,
@@ -127,7 +127,9 @@ async def list_tickets(
 
 
 @router.get("/{ticket_id}")
-async def get_ticket(ticket_id: int, viewer: ViewerDep, db: DBDep, s3: S3Dep) -> TicketDetailOut:
+async def get_ticket(
+    ticket_id: int, viewer: ViewerDep, guild: GuildDep, db: DBDep, s3: S3Dep
+) -> TicketDetailOut:
     """客服單的內容與紀錄頁面需要的資料（訊息用 GET /tickets/{id}/messages 分頁取得）。"""
     ticket = await visible_ticket(db, viewer, ticket_id)
     out = TicketDetailOut.model_validate(ticket)
@@ -138,6 +140,9 @@ async def get_ticket(ticket_id: int, viewer: ViewerDep, db: DBDep, s3: S3Dep) ->
         select(TicketUser).where(TicketUser.ticket_id == ticket.id).order_by(TicketUser.user_id)
     )
     out.users = [await user_out(s3, row) for row in rows]
+    out.roles, out.channels = guild_mentions(
+        guild, viewer, [ticket.content], staff=viewer.access.is_staff(ticket.category_id)
+    )
     members = await db.scalars(
         select(TicketMember)
         .where(TicketMember.ticket_id == ticket.id)

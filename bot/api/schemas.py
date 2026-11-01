@@ -242,6 +242,22 @@ class MemberOut(BaseModel):
     added_at: datetime
 
 
+class MentionedRoleOut(BaseModel):
+    """內容裡提及的身份組（<@&id>），名稱與顏色是伺服器現在的資料。"""
+
+    id: Snowflake
+    name: str
+    # 0 表示沒有顏色
+    color: int
+
+
+class MentionedChannelOut(BaseModel):
+    """內容裡提及的頻道（<#id>）；看不到的頻道不會回傳。"""
+
+    id: Snowflake
+    name: str
+
+
 class TicketDetailOut(TicketOut):
     content: str
     claimed_at: datetime | None
@@ -256,6 +272,9 @@ class TicketDetailOut(TicketOut):
     users: list[UserOut] = []
     # 額外加入的成員
     members: list[MemberOut] = []
+    # 開單內容裡提及的身份組與頻道
+    roles: list[MentionedRoleOut] = []
+    channels: list[MentionedChannelOut] = []
 
 
 class RatingIn(BaseModel):
@@ -408,6 +427,8 @@ class MessagePage(BaseModel):
     messages: list[MessageOut]
     # 這些訊息的作者與內容裡被 tag 的人（<@id>）的快照
     users: list[UserOut]
+    roles: list[MentionedRoleOut] = []
+    channels: list[MentionedChannelOut] = []
 
 
 class ExportIn(BaseModel):

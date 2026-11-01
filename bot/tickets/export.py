@@ -13,13 +13,14 @@ import logging
 import re
 import zipfile
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from importlib import resources
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import aiohttp
+import discord
 import filetype
 from botocore.exceptions import ClientError
 from jinja2 import Environment, PackageLoader, StrictUndefined
@@ -53,6 +54,7 @@ from bot.storage.mirror import download_small_file
 from bot.storage.s3 import upload_stream
 from bot.tickets import markdown
 from bot.tickets.history import visible_attachments, visible_revisions
+from bot.tickets.mentions import CHANNEL_MENTION, ROLE_MENTION, can_view, mentioned_ids
 
 if TYPE_CHECKING:
     from types_aiobotocore_s3 import S3Client
@@ -130,6 +132,12 @@ class Transcript:
     stickers: dict[int, str]
     # S3 上的備份
     media: dict[int, DiscordMedia]
+    # 內容裡提及的身份組（<@&id>）、頻道（<#id>）
+    role_ids: set[int]
+    channel_ids: set[int]
+    # resolve_mentions 從 Discord 取得：身份組的名稱與顏色、看得到的頻道的名稱
+    roles: dict[int, tuple[str, int]] = field(default_factory=dict)
+    channels: dict[int, str] = field(default_factory=dict)
 
     def all_attachments(self) -> list[TicketAttachment]:
         return [attachment for rows in self.attachments.values() for attachment in rows]
@@ -191,7 +199,31 @@ async def load(db: AsyncSession, ticket: Ticket, *, staff: bool) -> Transcript:
             row.id: row
             for row in await db.scalars(select(DiscordMedia).where(DiscordMedia.id.in_(media_ids)))
         },
+        role_ids=mentioned_ids(ROLE_MENTION, texts),
+        channel_ids=mentioned_ids(CHANNEL_MENTION, texts),
     )
+
+
+async def resolve_mentions(
+    discord_client: discord.Client, transcript: Transcript, *, staff: bool
+) -> None:
+    """身份組與頻道用伺服器現在的名稱（跟網頁一樣）。worker 沒有快取，用 REST 取得。
+
+    不是客服的匯出只顯示 @everyone 看得到的頻道的名稱。
+    """
+    if not transcript.role_ids and not transcript.channel_ids:
+        return
+    guild = await discord_client.fetch_guild(get_settings().guild_id)
+    for role_id in transcript.role_ids:
+        if (role := guild.get_role(role_id)) is not None:
+            transcript.roles[role_id] = (role.name, role.color.value)
+    for channel_id in transcript.channel_ids:
+        try:
+            channel = await guild.fetch_channel(channel_id)
+        except (discord.NotFound, discord.Forbidden):
+            continue
+        if can_view(channel, None if staff else guild.default_role):
+            transcript.channels[channel_id] = channel.name
 
 
 async def read_object(s3: S3Client, key: str) -> bytes:
@@ -330,6 +362,12 @@ class Renderer:
         user = self.transcript.users.get(user_id)
         return display_name(user) if user is not None else None
 
+    def role(self, role_id: int) -> tuple[str, int] | None:
+        return self.transcript.roles.get(role_id)
+
+    def channel_name(self, channel_id: int) -> str | None:
+        return self.transcript.channels.get(channel_id)
+
     def emoji(self, emoji_id: int, name: str, animated: bool) -> str:
         label = escape(f":{name}:")
         css_class = f"emoji-{emoji_id}"
@@ -341,7 +379,14 @@ class Renderer:
         )
 
     def markdown(self, text: str) -> Markup:
-        env = markdown.Env(tz=self.tz, now=self.now, emoji=self.emoji, user_name=self.user_name)
+        env = markdown.Env(
+            tz=self.tz,
+            now=self.now,
+            emoji=self.emoji,
+            user_name=self.user_name,
+            role=self.role,
+            channel_name=self.channel_name,
+        )
         return Markup(markdown.render(text, env))
 
     # ---- 範本用的資料 ----
@@ -584,6 +629,7 @@ async def export_ticket(
     db: AsyncSession,
     s3: S3Client,
     http: aiohttp.ClientSession,
+    discord_client: discord.Client,
     export_id: int,
     *,
     last_attempt: bool,
@@ -611,6 +657,7 @@ async def export_ticket(
             # 最後一次就不等了，沒處理完的附件只顯示檔名
             raise ExportNotReady(export_id)
 
+        await resolve_mentions(discord_client, transcript, staff=export.staff)
         files = transcript.files()
         now = utcnow()
         tz = timezone(timedelta(minutes=export.utc_offset))

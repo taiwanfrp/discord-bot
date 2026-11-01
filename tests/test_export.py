@@ -3,8 +3,11 @@ import zipfile
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
+import discord
 import pytest
 from fakeredis import FakeAsyncRedis
 from sqlalchemy import select
@@ -34,6 +37,39 @@ OPENER = 2**60
 STAFF = 2**60 + 1
 EMOJI_ID = 983318658476552222
 STICKER_ID = 1234567890123456789
+
+
+ROLE_ID = 2**60 + 10
+PUBLIC_CHANNEL = 2**60 + 11
+PRIVATE_CHANNEL = 2**60 + 12
+
+
+def fake_discord() -> Any:
+    """worker 的 Discord client：一個有顏色的身份組，一個公開、一個私人的頻道。"""
+    everyone = object()
+
+    def channel(channel_id: int, name: str, public: bool) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=channel_id,
+            name=name,
+            permissions_for=lambda viewer: SimpleNamespace(
+                view_channel=public or viewer is not everyone
+            ),
+        )
+
+    channels = {
+        PUBLIC_CHANNEL: channel(PUBLIC_CHANNEL, "公告", True),
+        PRIVATE_CHANNEL: channel(PRIVATE_CHANNEL, "客服討論", False),
+    }
+
+    async def fetch_channel(channel_id: int) -> SimpleNamespace:
+        if channel_id not in channels:
+            raise discord.NotFound(MagicMock(status=404), "Unknown Channel")
+        return channels[channel_id]
+
+    roles = {ROLE_ID: SimpleNamespace(name="節點提供者", color=discord.Colour(0x5865F2))}
+    guild = SimpleNamespace(get_role=roles.get, default_role=everyone, fetch_channel=fetch_channel)
+    return SimpleNamespace(fetch_guild=AsyncMock(return_value=guild))
 
 
 class FakeHttp:
@@ -204,6 +240,7 @@ async def run_export(
     staff: bool,
     http: FakeHttp | None = None,
     last_attempt: bool = False,
+    discord_client: Any = None,
 ) -> TicketExport:
     row = TicketExport(
         ticket_id=ticket.id,
@@ -220,7 +257,12 @@ async def run_export(
         }
     )
     await export.export_ticket(
-        db, cast(Any, s3), cast(Any, http), row.id, last_attempt=last_attempt
+        db,
+        cast(Any, s3),
+        cast(Any, http),
+        discord_client or fake_discord(),
+        row.id,
+        last_attempt=last_attempt,
     )
     await db.refresh(row)
     return row
@@ -341,6 +383,42 @@ async def test_waits_for_pending_attachments(db: AsyncSession) -> None:
     assert "尚未處理完成" in s3.objects[row.storage_key].decode()
 
 
+async def test_role_and_channel_mentions(db: AsyncSession) -> None:
+    """身份組與頻道顯示現在的名稱；不是客服的匯出只顯示 @everyone 看得到的頻道。"""
+    s3 = FakeS3()
+    ticket = await make_ticket(db, s3, with_file=False)
+    db.add(
+        TicketMessage(
+            ticket_id=ticket.id,
+            source=Source.DISCORD,
+            author_id=STAFF,
+            content=f"<@&{ROLE_ID}> 請看 <#{PUBLIC_CHANNEL}> <#{PRIVATE_CHANNEL}> <@&{2**60 + 99}>",
+            created_at=datetime(2026, 10, 28, 9, 0, tzinfo=UTC),
+        )
+    )
+    await db.commit()
+
+    page = s3.objects[(await run_export(db, s3, ticket, staff=False)).storage_key or ""].decode()
+    assert '<span class="md-mention" style="--mention-color: #5865f2">@節點提供者</span>' in page
+    assert '<span class="md-mention">#公告</span>' in page
+    assert f"&lt;#{PRIVATE_CHANNEL}&gt;" in page
+    assert f"&lt;@&amp;{2**60 + 99}&gt;" in page
+
+    # 客服看得到被移除的附件，所以是 ZIP
+    data = s3.objects[(await run_export(db, s3, ticket, staff=True)).storage_key or ""]
+    page = zipfile.ZipFile(io.BytesIO(data)).read("transcript.html").decode()
+    assert '<span class="md-mention">#客服討論</span>' in page
+
+
+async def test_no_mentions_skip_discord(db: AsyncSession) -> None:
+    """沒有提及身份組、頻道時不呼叫 Discord。"""
+    s3 = FakeS3()
+    ticket = await make_ticket(db, s3, with_file=False)
+    client = fake_discord()
+    await run_export(db, s3, ticket, staff=False, discord_client=client)
+    client.fetch_guild.assert_not_called()
+
+
 async def test_busy_and_finished_exports(db: AsyncSession, redis: FakeAsyncRedis) -> None:
     s3 = FakeS3()
     ticket = await make_ticket(db, s3, with_file=False)
@@ -350,14 +428,16 @@ async def test_busy_and_finished_exports(db: AsyncSession, redis: FakeAsyncRedis
     await redis.set(f"ticket-bot:lock:export:{row.id}", "other")
     with pytest.raises(export.ExportBusy):
         await export.export_ticket(
-            db, cast(Any, s3), cast(Any, FakeHttp()), row.id, last_attempt=False
+            db, cast(Any, s3), cast(Any, FakeHttp()), fake_discord(), row.id, last_attempt=False
         )
     await redis.delete(f"ticket-bot:lock:export:{row.id}")
 
     await export.give_up(db, row.id)
     assert row.status is ExportStatus.FAILED
     # 已經不是 pending：不會再產生
-    await export.export_ticket(db, cast(Any, s3), cast(Any, FakeHttp()), row.id, last_attempt=False)
+    await export.export_ticket(
+        db, cast(Any, s3), cast(Any, FakeHttp()), fake_discord(), row.id, last_attempt=False
+    )
     assert not any(key.startswith("exports/") for key in s3.objects)
 
 

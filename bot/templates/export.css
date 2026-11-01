@@ -278,7 +278,7 @@ audio.attachment-media { border: 0; }
 .discord-md.is-jumbo { font-size: 2.5em; line-height: 1.2; }
 .discord-md .md-timestamp { background-color: var(--elevated); border-radius: 4px; padding: 0 0.2em; }
 .discord-md .md-subtext { font-size: 0.75em; color: var(--muted); }
-.discord-md .md-mention { border-radius: 4px; padding: 0 0.2em; color: var(--primary-text); background: color-mix(in oklab, var(--primary) 15%, transparent); }
+.discord-md .md-mention { border-radius: 4px; padding: 0 0.2em; color: var(--mention-color, var(--primary-text)); background: color-mix(in oklab, var(--mention-color, var(--primary)) 15%, transparent); }
 /* 防雷：沒有 JavaScript，滑鼠移上去或用 Tab 選到時顯示 */
 .discord-md .md-spoiler { border-radius: 4px; padding: 0 0.15em; color: transparent; background-color: var(--dimmed); transition: background-color 0.15s, color 0.15s; }
 .discord-md .md-spoiler * { color: transparent; }

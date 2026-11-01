@@ -290,7 +290,11 @@ async def delete_unsent_attachments() -> None:
 
 
 @broker.task
-async def export_ticket(export_id: int, context: Context = ContextDep) -> None:
+async def export_ticket(
+    export_id: int,
+    context: Context = ContextDep,
+    discord_client: discord.Client = DiscordDep,
+) -> None:
     """產生客服單的匯出檔案，存到 S3（docs/tickets.md 8.8）。"""
     async with (
         get_sessionmaker()() as db,
@@ -299,7 +303,7 @@ async def export_ticket(export_id: int, context: Context = ContextDep) -> None:
     ):
         try:
             await export.export_ticket(
-                db, s3, http, export_id, last_attempt=is_last_attempt(context)
+                db, s3, http, discord_client, export_id, last_attempt=is_last_attempt(context)
             )
         except export.ExportBusy:
             # 結果由持有鎖的 worker 寫入

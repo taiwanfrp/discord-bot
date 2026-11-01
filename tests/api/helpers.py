@@ -148,6 +148,9 @@ class FakeGuild:
         # 快取裡沒有的頻道就是不存在
         raise discord.NotFound(MagicMock(status=404), "Unknown Channel")
 
+    def get_channel_or_thread(self, channel_id: int) -> MagicMock | None:
+        return self.get_channel(channel_id)
+
     def get_role(self, role_id: int) -> MagicMock | None:
         return next((r for r in self.roles if r.id == role_id), None)
 

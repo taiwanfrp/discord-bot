@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 from taskiq.exceptions import SendTaskError
 
-from bot.api.deps import DBDep, S3Dep, ViewerDep
+from bot.api.deps import DBDep, GuildDep, S3Dep, ViewerDep
 from bot.api.output import message_page
 from bot.api.routes.tickets import ticket_errors, visible_ticket
 from bot.api.schemas import AttachmentOut, MessageIn, MessageOut, MessagePage
@@ -22,6 +22,7 @@ router = APIRouter(prefix="/tickets", tags=["Messages"])
 async def list_messages(
     ticket_id: int,
     viewer: ViewerDep,
+    guild: GuildDep,
     db: DBDep,
     s3: S3Dep,
     before: int | None = None,
@@ -43,14 +44,12 @@ async def list_messages(
     else:
         messages = list(await db.scalars(query.order_by(TicketMessage.id.desc()).limit(limit)))
         messages.reverse()
-    return await message_page(
-        db, s3, ticket, messages, staff=viewer.access.is_staff(ticket.category_id)
-    )
+    return await message_page(db, s3, guild, viewer, ticket, messages)
 
 
 @router.get("/{ticket_id}/messages/{message_id}")
 async def get_message(
-    ticket_id: int, message_id: int, viewer: ViewerDep, db: DBDep, s3: S3Dep
+    ticket_id: int, message_id: int, viewer: ViewerDep, guild: GuildDep, db: DBDep, s3: S3Dep
 ) -> MessagePage:
     """單則訊息，例如收到 SSE 的 message.updated、message.deleted 時重新取得。
 
@@ -60,9 +59,7 @@ async def get_message(
     message = await db.get(TicketMessage, message_id)
     if message is None or message.ticket_id != ticket.id:
         raise HTTPException(404, "找不到這則訊息")
-    return await message_page(
-        db, s3, ticket, [message], staff=viewer.access.is_staff(ticket.category_id)
-    )
+    return await message_page(db, s3, guild, viewer, ticket, [message])
 
 
 @router.post("/{ticket_id}/messages", status_code=201)

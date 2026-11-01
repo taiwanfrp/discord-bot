@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 from sqlalchemy import update
 
@@ -7,12 +9,13 @@ from bot.core.config import get_settings
 from bot.db.models import (
     AttachmentStatus,
     Source,
+    Ticket,
     TicketAttachment,
     TicketMessage,
     TicketMessageRevision,
     TicketUser,
 )
-from tests.api.helpers import Env
+from tests.api.helpers import Env, make_role, make_text_channel
 from tests.api.test_ticket_actions import ADMIN, OPENER, OTHER, STAFF, login_as, open_ticket
 from tests.api.test_web_messages import upload
 
@@ -169,6 +172,31 @@ async def test_messages(env: Env) -> None:
     assert (await env.client.get(url)).status_code == 404
 
 
+async def test_mentioned_roles_and_channels(env: Env) -> None:
+    """身份組與頻道用伺服器現在的名稱；不是客服的人只拿得到自己看得到的頻道。"""
+    public, private = make_text_channel(10**17, "公告"), make_text_channel(10**17 + 1, "內部")
+    for channel, visible in ((public, True), (private, False)):
+        channel.permissions_for = MagicMock(return_value=SimpleNamespace(view_channel=visible))
+    env.guild.channels += [public, private]
+    env.guild.roles.append(make_role(10**17 + 2, "節點提供者"))
+    text = f"<@&{10**17 + 2}> <#{public.id}> <#{private.id}> <#{10**17 + 3}>"
+    ticket_id, _ = await open_ticket(env)
+    async with env.sessionmaker() as db:
+        await db.execute(update(Ticket).where(Ticket.id == ticket_id).values(content=text))
+        await db.commit()
+    await env.post(f"/tickets/{ticket_id}/messages", {"content": text, "attachment_ids": []})
+
+    role = {"id": str(10**17 + 2), "name": "節點提供者", "color": 0xFF0000}
+    for user_id, channels in ((OPENER, ["公告"]), (STAFF, ["公告", "內部"])):
+        await login_as(env, user_id)
+        for body in (
+            (await env.client.get(f"/tickets/{ticket_id}")).json(),
+            await messages(env, ticket_id),
+        ):
+            assert body["roles"] == [role]
+            assert sorted(c["name"] for c in body["channels"]) == sorted(channels)
+
+
 async def test_mentioned_users(env: Env) -> None:
     """訊息裡被 tag 的人（<@id>）的快照也一起回傳；被刪除的訊息只有客服看得到。"""
     ticket_id, _ = await open_ticket(env)
@@ -284,7 +312,7 @@ async def test_edited_and_deleted_messages(env: Env) -> None:
         """單則訊息的 API 跟列表的內容一樣。"""
         for message in page["messages"]:
             response = await env.client.get(f"/tickets/{ticket_id}/messages/{message['id']}")
-            assert response.json() == {"messages": [message], "users": page["users"]}
+            assert response.json() == {**page, "messages": [message]}
 
     page = await messages(env, ticket_id)
     await check_single(page)

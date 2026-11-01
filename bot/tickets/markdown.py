@@ -19,6 +19,7 @@ from markdown_it.token import Token
 from markdown_it.utils import OptionsDict
 
 from bot.storage.media import EMOJI_PATTERN
+from bot.tickets.mentions import CHANNEL_MENTION, ROLE_MENTION, USER_MENTION
 
 
 @dataclass
@@ -33,6 +34,9 @@ class Env:
     emoji: Callable[[int, str, bool], str]
     # <@id> 顯示的名稱；None 表示不是這張單裡的人
     user_name: Callable[[int], str | None]
+    # <@&id> 的名稱與顏色（0 是沒有顏色）、<#id> 的名稱；None 表示找不到或看不到
+    role: Callable[[int], tuple[str, int] | None]
+    channel_name: Callable[[int], str | None]
 
 
 # html=False 會跳脫原始 HTML
@@ -224,8 +228,6 @@ def _render_emoji(
 
 md.add_render_rule("discord_emoji", _render_emoji)
 
-USER_MENTION = re.compile(r"<@!?(\d{15,21})>")
-
 
 def _mention(state: StateInline, silent: bool) -> bool:
     """<@id>：有快照的人（作者與被 tag 的人）換成名稱，沒有的照原樣顯示。"""
@@ -252,6 +254,54 @@ def _render_mention(
 
 
 md.add_render_rule("discord_mention", _render_mention)
+
+
+def _guild_mention(kind: str, pattern: re.Pattern[str]) -> Callable[[StateInline, bool], bool]:
+    """<@&id> 身份組、<#id> 頻道：找得到的顯示名稱，找不到或看不到的照原樣顯示。"""
+
+    def rule(state: StateInline, silent: bool) -> bool:
+        match = pattern.match(state.src, state.pos, state.posMax)
+        if match is None:
+            return False
+        if not silent:
+            state.push(kind, "span", 0).meta = {"id": int(match[1]), "raw": match[0]}
+        state.pos = match.end()
+        return True
+
+    return rule
+
+
+md.inline.ruler.before("autolink", "discord_role", _guild_mention("discord_role", ROLE_MENTION))
+md.inline.ruler.before(
+    "autolink", "discord_channel", _guild_mention("discord_channel", CHANNEL_MENTION)
+)
+
+
+def _render_role(
+    self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: dict[str, Env]
+) -> str:
+    meta = tokens[idx].meta
+    role = env["export"].role(meta["id"])
+    if role is None:
+        return escapeHtml(meta["raw"])
+    name, color = role
+    # 有顏色的身份組跟 Discord 一樣用它的顏色
+    style = f' style="--mention-color: #{color:06x}"' if color else ""
+    return f'<span class="md-mention"{style}>@{escapeHtml(name)}</span>'
+
+
+def _render_channel(
+    self: RendererHTML, tokens: Sequence[Token], idx: int, options: OptionsDict, env: dict[str, Env]
+) -> str:
+    meta = tokens[idx].meta
+    name = env["export"].channel_name(meta["id"])
+    if name is None:
+        return escapeHtml(meta["raw"])
+    return f'<span class="md-mention">#{escapeHtml(name)}</span>'
+
+
+md.add_render_rule("discord_role", _render_role)
+md.add_render_rule("discord_channel", _render_channel)
 
 
 def _strong(tag: str) -> Callable[..., str]:
