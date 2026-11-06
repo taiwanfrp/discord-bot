@@ -56,7 +56,7 @@ docs/tickets.md      # 客服單系統設計
 docs/auth.md         # 身分驗證
 TODO.md
 Dockerfile           # bot、worker、scheduler 共用的 image；放進去的檔案由 .dockerignore 的白名單決定
-compose.yaml         # 正式環境：PostgreSQL、Redis，以及 migrate 跑完才啟動的 bot、worker、scheduler（docs/tickets.md 11.3）
+compose.yaml         # 正式環境：migrate 跑完才啟動的 bot、worker、scheduler，PostgreSQL、Redis 可以用外部的或自帶的（bundled profile，docs/tickets.md 11.3）
 compose.dev.yaml     # 本機開發用的 Redis、Silo，以及測試用的資料庫（db profile）
 .github/workflows/ci.yml   # CI：pre-commit、四種資料庫的測試，通過後建立 image（build.yml）
 .github/workflows/build.yml   # ci.yml 呼叫：在各自的 runner 建立 amd64、arm64 的 image、smoke test，main 推送到 GHCR（sha- tag 與 latest）
@@ -114,7 +114,7 @@ compose.dev.yaml     # 本機開發用的 Redis、Silo，以及測試用的資�
 - 附件一律使用串流處理，不可以把整個檔案讀進記憶體（上限 1 GB）。
 - 附件儲存只依賴 S3 API，不可以使用特定服務商（例如 R2）專屬的功能。
 - Redis 的 key 一律加上 `ticket-bot:` 前綴（與主要 API 約定的 `auth:session:`、`auth:ticket_code:` 除外，docs/auth.md 第 5 節）；不要用 db 編號區分資料，pub/sub 不分 db。
-- queue 與鎖使用單一主節點的 Redis（`REDIS_URL`），不可以放在多主架構的 session store 上。
+- queue 與鎖使用的 Redis（`REDIS_URL`）可以跟 session store 共用；多主架構時 bot、worker、scheduler 一定要連到同一個節點，不能經過會切換節點的負載平衡（docs/tickets.md 11）。
 - 工作寫在 `bot/worker/tasks.py`，用 `@broker.task` 定義；需要 Discord 時加上參數 `discord_client: discord.Client = DiscordDep`（`bot.worker.broker`，只有 REST API，沒有快取）。要用預設值的寫法，`.kiq()` 才不需要傳這個參數；不要命名為 `discord`，會蓋掉 `discord` 模組。
 - worker 的 Discord client 沒有快取（`guild.get_channel` 一定是 None）：要用頻道時用 `bot.tickets.channels.get_text_channel`，快取裡沒有時才用 REST 取得。
 - 失敗的工作會自動重試，間隔 1、2、4、8、16 分鐘，由 scheduler 放回 queue。不需要重試的錯誤要自己處理掉，不要丟出例外。

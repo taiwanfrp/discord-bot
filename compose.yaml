@@ -2,8 +2,8 @@
 x-env: &env
   DISCORD_TOKEN: ${DISCORD_TOKEN:?}
   GUILD_ID: ${GUILD_ID:?}
-  DATABASE_URL: postgresql+asyncpg://ticket_bot:${POSTGRES_PASSWORD:?}@postgres/ticket_bot
-  REDIS_URL: redis://redis:6379
+  DATABASE_URL: ${DATABASE_URL:?}
+  REDIS_URL: ${REDIS_URL:?}
   SESSION_REDIS_URL: ${SESSION_REDIS_URL:?}
   ENCRYPTION_KEYS: ${ENCRYPTION_KEYS:?}
   S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?}
@@ -31,17 +31,21 @@ x-app: &app
   depends_on:
     migrate:
       condition: service_completed_successfully
+    # 用外部的 Redis 時不會啟動（bundled profile）
     redis:
       condition: service_healthy
+      required: false
 
 services:
+  # 自帶的 PostgreSQL、Redis 只有 COMPOSE_PROFILES=bundled 時才啟動
   postgres:
     image: postgres:18-alpine
+    profiles: [bundled]
     restart: unless-stopped
     environment:
       POSTGRES_DB: ticket_bot
       POSTGRES_USER: ticket_bot
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
@@ -53,6 +57,7 @@ services:
 
   redis:
     image: redis:8-alpine
+    profiles: [bundled]
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -73,6 +78,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        required: false
 
   bot:
     <<: *app

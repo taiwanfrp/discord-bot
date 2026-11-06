@@ -458,7 +458,10 @@ sequenceDiagram
   - Redis ACL 的權限是依照 key 的前綴設定，跟 db 無關。
 - 每個服務各自使用自己的 queue 名稱與 key 前綴（這個 bot 是 `ticket-bot:`），並用 ACL 限制只能存取自己的前綴。唯一的例外是 taskiq-redis 內部用來當作鎖的 `autoclaim:ticket-bot:worker:ticket-bot:queue`，ACL 要一併允許。
 - 之後如果有**不是 Python** 的服務要使用 queue，該服務與 bot 之間的工作改用自己定義、有文件的 JSON 格式（例如 `{"type": "send_dm", ...}`），不要讓其他語言去模仿 taskiq 的內部格式。
-- **queue 要放在單一主節點的 Redis**，不要放在多主架構的 session store 上。多主架構的複製是非同步的，兩個節點可能同時把同一個工作交給不同的 worker，鎖（Redis lock）也會失效。
+- **queue 可以跟 session store 共用同一個 Redis**（用 `ticket-bot:` 前綴區分）。session store 是多主架構時，bot、worker、scheduler **一定要連到同一個節點**：多主架構的複製是非同步的，寫到不同的節點時，兩個節點可能同時把同一個工作交給不同的 worker，鎖（Redis lock）也會同時被兩邊取得。所以不能經過會切換節點的負載平衡。
+  - `maxmemory-policy` 要是 `noeviction`，否則記憶體不夠時 queue 裡的工作和鎖可能被刪掉。
+  - 要開啟持久化（AOF 或 RDB），重啟後 queue 裡的工作才不會遺失。
+  - bot 用的帳號（`REDIS_URL`）跟讀取 session 用的帳號（`SESSION_REDIS_URL`，docs/auth.md 4.5）分開，ACL 只允許 `ticket-bot:*` 與上面的 `autoclaim:` key。
 
 ### 11.1 工作清單
 
@@ -535,10 +538,14 @@ flowchart LR
 - **migration**：每次部署先用同一個 image 執行一次 `alembic upgrade head`，再更新三個服務。部署期間新舊版本會同時執行一段時間（migration 時舊版本還在跑，worker 也可以先啟動新的），所以 migration 和工作的參數都要跟上一版相容：
   - 新增欄位要允許 NULL，或是有預設值。
   - 刪除欄位或改名要分兩次部署：先讓程式不再使用，下一次再刪除。
-- **`compose.yaml`**：正式環境用的 compose（本機開發用的是 `compose.dev.yaml`），照上面的表格設定好四個服務，PostgreSQL、Redis 也一起啟動。用 `docker compose up -d` 部署或更新，也可以交給支援 compose 的部署平台。
-  - PostgreSQL 通過健康檢查後才跑 `migrate`；`migrate` 跑完（`service_completed_successfully`）、Redis 通過健康檢查，才啟動或更新其他三個。`migrate` 每次 `up` 都會再跑一次，已經是最新版本時什麼都不做。
-  - `DATABASE_URL`、`REDIS_URL` 固定連到裡面的 PostgreSQL、Redis，只要設定 `POSTGRES_PASSWORD`。密碼會放進網址，用 `openssl rand -hex 32` 這種只有英數字的，才不用跳脫。
-  - PostgreSQL、Redis 沒有對外的 port。資料存在 `postgres-data`、`redis-data` 兩個 volume，`docker compose down` 會保留，加上 `-v` 才會刪除。Redis 開啟 `appendonly`，重啟後 queue 裡的工作不會遺失。
+- **`compose.yaml`**：正式環境用的 compose（本機開發用的是 `compose.dev.yaml`），照上面的表格設定好四個服務。用 `docker compose up -d` 部署或更新，也可以交給支援 compose 的部署平台。
+  - PostgreSQL、Redis 可以用外部的，也可以用自帶的：
+    - **外部**：`DATABASE_URL`、`REDIS_URL` 設成外部的網址。PostgreSQL 要先建立 bot 專用的帳號與資料庫，不要跟其他服務共用資料庫（各自的 Alembic 會互相干擾）。Redis 的條件見第 11 節。
+    - **自帶**：`COMPOSE_PROFILES=bundled` 時一起啟動 `postgres`、`redis`（`postgres:18-alpine`、`redis:8-alpine`）。`DATABASE_URL` 設成 `postgresql+asyncpg://ticket_bot:<POSTGRES_PASSWORD>@postgres/ticket_bot`，`REDIS_URL` 設成 `redis://redis:6379`。密碼會放進網址，用 `openssl rand -hex 32` 這種只有英數字的，才不用跳脫。
+    - 兩個網址都是必填，沒有預設值：部署平台可能會帶入 `.env.example` 的本機開發用的值，所以一定要明確設定。
+    - 從自帶的換成外部的時，PostgreSQL 的資料要搬過去（下面的備份指令，再用 `psql` 匯入）。Redis 不用搬，但要在 queue 是空的時候換，網頁上的登入（ticket session）會失效，重新登入就好。
+  - 自帶的 PostgreSQL 通過健康檢查後才跑 `migrate`；`migrate` 跑完（`service_completed_successfully`）、自帶的 Redis 通過健康檢查，才啟動或更新其他三個（`depends_on` 是 `required: false`，用外部的時不會等）。`migrate` 每次 `up` 都會再跑一次，已經是最新版本時什麼都不做。
+  - 自帶的 PostgreSQL、Redis 沒有對外的 port。資料存在 `postgres-data`、`redis-data` 兩個 volume，`docker compose down` 會保留，加上 `-v` 才會刪除。Redis 開啟 `appendonly`，重啟後 queue 裡的工作不會遺失。
   - 備份：`docker compose exec -T postgres pg_dump -U ticket_bot ticket_bot > backup.sql`，加密金鑰（`ENCRYPTION_KEYS`）要另外備份。PostgreSQL 的大版本（image 的 `18`）不能直接改，要先 dump 再匯入新版本。
   - 環境變數四個服務共用同一組，從 shell 或同一個資料夾的 `.env` 讀取。必填的用 `${VAR:?}` 標示，沒有填就不能啟動；選填的用 `${VAR:-}`，空白時用程式的預設值（`Settings` 把空白的環境變數當作沒有設定）。
   - `IMAGE_TAG` 預設是 `latest`，退回舊版時改成那一版的 `sha-` tag。
@@ -739,7 +746,7 @@ GUILD_ID
 DATABASE_URL          例：sqlite+aiosqlite:///data/bot.db
                           mysql+aiomysql://user:pass@host/db?charset=utf8mb4
                           postgresql+asyncpg://user:pass@host/db
-REDIS_URL             queue、事件通知、鎖、ticket session 共用（單一主節點，與 session store 分開）
+REDIS_URL             queue、事件通知、鎖、ticket session 共用（可以跟 session store 同一台，多主架構時要連同一個節點）
 ENCRYPTION_KEYS       Fernet 金鑰，逗號分隔，第一個是目前使用的金鑰
 S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET
                       S3_ENDPOINT 留空表示 AWS S3
