@@ -31,16 +31,16 @@ x-app: &app
   depends_on:
     migrate:
       condition: service_completed_successfully
-    # 用外部的 Redis 時不會啟動（bundled profile）
+    # 用外部的 Redis 時不會啟動（redis profile）
     redis:
       condition: service_healthy
       required: false
 
 services:
-  # 自帶的 PostgreSQL、Redis 只有 COMPOSE_PROFILES=bundled 時才啟動
+  # 自帶的 PostgreSQL、Redis 分別在 COMPOSE_PROFILES 有 postgres、redis 時才啟動
   postgres:
     image: postgres:18-alpine
-    profiles: [bundled]
+    profiles: [postgres]
     restart: unless-stopped
     environment:
       POSTGRES_DB: ticket_bot
@@ -57,7 +57,7 @@ services:
 
   redis:
     image: redis:8-alpine
-    profiles: [bundled]
+    profiles: [redis]
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:

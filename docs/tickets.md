@@ -541,7 +541,7 @@ flowchart LR
 - **`compose.yaml`**：正式環境用的 compose（本機開發用的是 `compose.dev.yaml`），照上面的表格設定好四個服務。用 `docker compose up -d` 部署或更新，也可以交給支援 compose 的部署平台。
   - PostgreSQL、Redis 可以用外部的，也可以用自帶的：
     - **外部**：`DATABASE_URL`、`REDIS_URL` 設成外部的網址。PostgreSQL 要先建立 bot 專用的帳號與資料庫，不要跟其他服務共用資料庫（各自的 Alembic 會互相干擾）。Redis 的條件見第 11 節。
-    - **自帶**：`COMPOSE_PROFILES=bundled` 時一起啟動 `postgres`、`redis`（`postgres:18-alpine`、`redis:8-alpine`）。`DATABASE_URL` 設成 `postgresql+asyncpg://ticket_bot:<POSTGRES_PASSWORD>@postgres/ticket_bot`，`REDIS_URL` 設成 `redis://redis:6379`。密碼會放進網址，用 `openssl rand -hex 32` 這種只有英數字的，才不用跳脫。
+    - **自帶**：`COMPOSE_PROFILES` 有 `postgres`、`redis` 時，分別一起啟動 `postgres:18-alpine`、`redis:8-alpine`，可以只用其中一個（例如 `COMPOSE_PROFILES=postgres`，Redis 用外部的）。PostgreSQL 跟 bot 之間的延遲會影響每一個查詢，外部的 PostgreSQL 離 bot 很遠時，用自帶的比較好。`DATABASE_URL` 設成 `postgresql+asyncpg://ticket_bot:<POSTGRES_PASSWORD>@postgres/ticket_bot`，`REDIS_URL` 設成 `redis://redis:6379`。密碼會放進網址，用 `openssl rand -hex 32` 這種只有英數字的，才不用跳脫。
     - 兩個網址都是必填，沒有預設值：部署平台可能會帶入 `.env.example` 的本機開發用的值，所以一定要明確設定。
     - 從自帶的換成外部的時，PostgreSQL 的資料要搬過去（下面的備份指令，再用 `psql` 匯入）。Redis 不用搬，但要在 queue 是空的時候換，網頁上的登入（ticket session）會失效，重新登入就好。
   - 自帶的 PostgreSQL 通過健康檢查後才跑 `migrate`；`migrate` 跑完（`service_completed_successfully`）、自帶的 Redis 通過健康檢查，才啟動或更新其他三個（`depends_on` 是 `required: false`，用外部的時不會等）。`migrate` 每次 `up` 都會再跑一次，已經是最新版本時什麼都不做。

@@ -56,7 +56,7 @@ docs/tickets.md      # 客服單系統設計
 docs/auth.md         # 身分驗證
 TODO.md
 Dockerfile           # bot、worker、scheduler 共用的 image；放進去的檔案由 .dockerignore 的白名單決定
-compose.yaml         # 正式環境：migrate 跑完才啟動的 bot、worker、scheduler，PostgreSQL、Redis 可以用外部的或自帶的（bundled profile，docs/tickets.md 11.3）
+compose.yaml         # 正式環境：migrate 跑完才啟動的 bot、worker、scheduler，PostgreSQL、Redis 可以用外部的或自帶的（postgres、redis profile，docs/tickets.md 11.3）
 compose.dev.yaml     # 本機開發用的 Redis、Silo，以及測試用的資料庫（db profile）
 .github/workflows/ci.yml   # CI：pre-commit、四種資料庫的測試，通過後建立 image（build.yml）
 .github/workflows/build.yml   # ci.yml 呼叫：在各自的 runner 建立 amd64、arm64 的 image、smoke test，main 推送到 GHCR（sha- tag 與 latest）
