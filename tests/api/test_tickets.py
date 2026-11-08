@@ -1,10 +1,14 @@
+import json
+from datetime import timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
 import discord
+import pytest
 from sqlalchemy import select, text
 
 from bot.db.models import Ticket, TicketEvent, TicketStatus, TicketUser
+from bot.db.types import utcnow
 from bot.tickets import open as open_module
 from tests.api.helpers import USER_ID, Env, make_category_channel, make_role
 
@@ -141,6 +145,50 @@ async def test_open_ticket_limit(env: Env) -> None:
     response = await open_ticket(env, category_id)
     assert response.status_code == 409
     assert "最多只能開 2 張" in response.json()["detail"]
+
+
+async def ban_account(env: Env, until: str | None, reason: str | None = "濫用") -> None:
+    """模擬主要 API 封禁帳號（docs/auth.md 5.5）。"""
+    await env.sessions.set(f"auth:ban:{USER_ID}", json.dumps({"reason": reason, "until": until}))
+
+
+async def test_banned_account_can_open_one_ticket(env: Env) -> None:
+    category_id = await setup_category(env)
+    until = (utcnow() + timedelta(days=7)).replace(microsecond=0)
+    await ban_account(env, until.isoformat())
+
+    assert (await open_ticket(env, category_id)).status_code == 201
+    note = env.guild.created_channels[0].send.call_args.kwargs["embed"].fields[-1]
+    assert note.name == "帳號封禁"
+    assert f"<t:{int(until.timestamp())}>" in note.value and "濫用" in note.value
+
+    response = await open_ticket(env, category_id)
+    assert response.status_code == 409
+    assert "封禁中" in response.json()["detail"]
+
+
+async def test_permanent_ban_without_reason(env: Env) -> None:
+    category_id = await setup_category(env)
+    await ban_account(env, None, reason=None)
+
+    assert (await open_ticket(env, category_id)).status_code == 201
+    note = env.guild.created_channels[0].send.call_args.kwargs["embed"].fields[-1]
+    assert "永久" in note.value and "未提供" in note.value
+
+
+@pytest.mark.parametrize("value", ["expired", "not json", '{"until": "2999-01-01T00:00:00"}'])
+async def test_ignored_account_ban(env: Env, value: str) -> None:
+    """已經到期、格式不對的封禁當作沒有封禁。"""
+    category_id = await setup_category(env)
+    if value == "expired":
+        await ban_account(env, (utcnow() - timedelta(minutes=1)).isoformat())
+    else:
+        await env.sessions.set(f"auth:ban:{USER_ID}", value)
+
+    assert (await open_ticket(env, category_id)).status_code == 201
+    assert (await open_ticket(env, category_id)).status_code == 201
+    fields = env.guild.created_channels[0].send.call_args.kwargs["embed"].fields
+    assert "帳號封禁" not in [field.name for field in fields]
 
 
 async def test_category_checks(env: Env) -> None:

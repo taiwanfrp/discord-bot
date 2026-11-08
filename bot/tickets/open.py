@@ -1,5 +1,8 @@
 import contextlib
+import json
 import logging
+from dataclasses import dataclass
+from datetime import datetime
 
 import discord
 from redis.asyncio import Redis
@@ -32,6 +35,16 @@ from bot.tickets.snapshot import update_snapshot
 
 log = logging.getLogger(__name__)
 
+# 主要 API 封禁的帳號同時只能開 1 張客服單（docs/tickets.md 5.2）
+BANNED_MAX_OPEN_TICKETS = 1
+
+
+@dataclass(frozen=True)
+class AccountBan:
+    reason: str | None
+    until: datetime | None  # None 是永久
+
+
 # 開單訊息的 embed 只放內容的開頭，剩下的用一般訊息接在後面送出（docs/tickets.md 5.3）。
 # Discord 對訊息的大小有沒公開的上限：主旨 100 字加內容 4000 字的中文就會被拒絕（413），
 # 雖然都沒超過 embed 的字數限制
@@ -51,6 +64,7 @@ async def open_ticket(
     subject: str,
     content: str,
     source: Source,
+    session_redis: Redis,
 ) -> Ticket:
     """從 Discord 或網頁開單的共用流程（docs/tickets.md 5.3）。"""
     category = await db.get(TicketCategory, category_id)
@@ -66,8 +80,9 @@ async def open_ticket(
 
     # 開單者不在伺服器裡時，先不加進頻道（docs/tickets.md 5.2）
     member = opener if isinstance(opener, discord.Member) else guild.get_member(opener.id)
+    ban = await get_account_ban(session_redis, opener.id)
     ticket = await create_ticket_row(
-        db, redis, settings, member or opener, category, subject, content, source
+        db, redis, settings, member or opener, category, subject, content, source, ban
     )
 
     channel: discord.TextChannel | None = None
@@ -99,7 +114,13 @@ async def open_ticket(
         message = await channel.send(
             content=member.mention if member else None,
             embed=ticket_embed(
-                ticket, category, opener, in_guild=member is not None, banned=banned, content=head
+                ticket,
+                category,
+                opener,
+                in_guild=member is not None,
+                banned=banned,
+                account_ban=ban,
+                content=head,
             ),
             view=TicketControlsView(claimed=False),
             allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
@@ -132,6 +153,7 @@ async def create_ticket_row(
     subject: str,
     content: str,
     source: Source,
+    ban: AccountBan | None = None,
 ) -> Ticket:
     """檢查開單上限並建立資料。同一個人同時送出好幾次時，用鎖避免超過上限。"""
     lock = redis.lock(f"ticket-bot:lock:open:{opener.id}", timeout=30, blocking_timeout=10)
@@ -147,6 +169,8 @@ async def create_ticket_row(
             .select_from(Ticket)
             .where(Ticket.opener_id == opener.id, Ticket.status == TicketStatus.OPEN)
         )
+        if ban is not None and (open_count or 0) >= BANNED_MAX_OPEN_TICKETS:
+            raise TicketError(f"帳號封禁中，同時只能開 {BANNED_MAX_OPEN_TICKETS} 張客服單")
         if (open_count or 0) >= settings.max_open_tickets_per_user:
             raise TicketError(f"同時最多只能開 {settings.max_open_tickets_per_user} 張客服單")
 
@@ -208,6 +232,30 @@ async def is_banned(guild: discord.Guild, user: discord.abc.Snowflake) -> bool:
     return True
 
 
+async def get_account_ban(session_redis: Redis, user_id: int) -> AccountBan | None:
+    """主要 API 封禁的帳號（docs/auth.md 5.5）；查不到、已經到期時是 None。"""
+    try:
+        raw = await session_redis.get(f"auth:ban:{user_id}")
+    except RedisError:
+        # 查不到時不擋開單，最多讓封禁的人多開幾張
+        log.warning("Failed to read the account ban of %d", user_id, exc_info=True)
+        return None
+    if not isinstance(raw, str):
+        return None
+    try:
+        data = json.loads(raw)
+        until = datetime.fromisoformat(data["until"]) if data.get("until") else None
+    except (json.JSONDecodeError, TypeError, KeyError, ValueError, AttributeError):
+        log.warning("Invalid account ban of %d", user_id)
+        return None
+    if until is not None and until.tzinfo is None:
+        return None
+    if until is not None and until <= utcnow():
+        return None
+    reason = data.get("reason")
+    return AccountBan(reason=reason if isinstance(reason, str) else None, until=until)
+
+
 def split_content(content: str) -> tuple[str, list[str]]:
     """開單內容分成 embed 裡的開頭，以及接在後面的一般訊息。"""
     if len(content) <= EMBED_CONTENT_LIMIT:
@@ -238,6 +286,7 @@ def ticket_embed(
     in_guild: bool,
     banned: bool,
     content: str,
+    account_ban: AccountBan | None = None,
 ) -> discord.Embed:
     embed = discord.Embed(
         title=f"#{ticket.id} {ticket.subject}"[:256],
@@ -249,6 +298,14 @@ def ticket_embed(
     embed.add_field(name="開單者", value=f"{opener.mention}（{opener.name}）")
     embed.add_field(name="來源", value="Discord" if ticket.source is Source.DISCORD else "網頁")
     embed.add_field(name="接手", value=claim_text(ticket.claimed_by_id))
+    if account_ban is not None:
+        until = discord.utils.format_dt(account_ban.until) if account_ban.until else "永久"
+        reason = account_ban.reason or "未提供"
+        embed.add_field(
+            name="帳號封禁",
+            value=f"開單者的 TaiwanFRP 帳號封禁中，到期：{until}\n原因：{reason}"[:1024],
+            inline=False,
+        )
     if not in_guild:
         note = "開單者目前不在伺服器內" + ("，而且已被停權" if banned else "")
         embed.add_field(

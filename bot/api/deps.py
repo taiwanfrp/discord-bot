@@ -74,8 +74,8 @@ def ticket_session_key(token: str) -> str:
     return f"ticket-bot:ticket_session:{hashlib.sha256(token.encode()).hexdigest()}"
 
 
-# 主要 API 的帳號狀態：停權中的帳號也可以開客服單（例如申請啟用帳號），封鎖、刪除的不行
-USABLE_ACCOUNT_STATUSES = frozenset({"active", "suspended"})
+# 主要 API 的帳號狀態：停權、封禁中的帳號也可以開客服單（例如申請啟用帳號、申訴），刪除的不行
+USABLE_ACCOUNT_STATUSES = frozenset({"active", "suspended", "banned"})
 
 
 def api_session_key(api_session_hash: str) -> str:

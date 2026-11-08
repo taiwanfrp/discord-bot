@@ -138,11 +138,12 @@ bot 使用 Redis ACL 的專用帳號，只能：
 
 - **讀取**主要 API 的 session（`auth:session:*`）。session 裡還有 email 等資料，bot 只使用 `discord_id` 與帳號狀態，不記錄其他欄位。
 - **讀取並刪除**授權碼（`auth:ticket_code:*`）。
+- **讀取**帳號的封禁（`auth:ban:*`，5.5）。
 
 ACL 範例：
 
 ```
-ACL SETUSER ticket-bot on >密碼 resetkeys ~auth:session:* ~auth:ticket_code:* resetchannels -@all +ping +get +ttl +getdel
+ACL SETUSER ticket-bot on >密碼 resetkeys ~auth:session:* ~auth:ticket_code:* ~auth:ban:* resetchannels -@all +ping +get +ttl +getdel
 ```
 
 `SESSION_REDIS_URL` 要跟主要 API 的 `REDIS_URL` 使用同一個 db。不是 db 0 的話（網址結尾的 `/數字`），連線時會先切換 db，ACL 要再加上 `+select`。
@@ -175,7 +176,7 @@ value： JSON 字串
 
 - key 用 session 的 **SHA-256 雜湊**，不存原始的 session。這樣即使 session store 外洩，也拿不到能用的 session。
 - 登出：直接刪除這個 key。
-- 帳號狀態改變時（例如封鎖），主要 API 會更新這個使用者所有 session 的 `internal_account_status`。bot 接受 `active` 與 `suspended`（停權中的帳號也可以開客服單，例如申請啟用帳號），其他狀態一律當作沒有登入。
+- 帳號狀態改變時（例如封禁），主要 API 會更新這個使用者所有 session 的 `internal_account_status`。bot 接受 `active`、`suspended`、`banned`（停權、封禁中的帳號也可以開客服單，例如申請啟用帳號、申訴），`deleted` 當作沒有登入。
 - 主要 API 之後要在 JSON 裡加欄位沒有問題，bot 只會讀取 `discord_id` 與 `internal_account_status`。
 
 ### 5.3 產生授權碼
@@ -206,6 +207,23 @@ Cookie: auth=<session>
 ### 5.4 Discord ID 的格式
 
 Discord ID 在 JSON 與 Redis 裡一律用**字串**。snowflake 超過 JavaScript 的安全整數範圍（2^53），用數字傳的話，前端會出現精度錯誤。
+
+### 5.5 帳號的封禁
+
+從 Discord 開單的人不一定登入過網頁，沒有 session，所以封禁另外用 Discord ID 存一份：
+
+```
+key：   auth:ban:<discord_id>
+value： JSON 字串
+          reason   原因，沒有時是 null
+          until    到期時間（ISO 8601，有時區），永久是 null
+過期：  有期限的用 EXPIREAT 在到期時過期，永久的沒有 TTL
+```
+
+- 主要 API 在封禁、修改封禁、解除封禁（刪除 key）時寫入；資料庫才是真實狀態，key 不見時可以用主要 API 的 `scripts/sync_bans.py` 重新寫入。
+- 只有 `banned` 的帳號有這個 key，`suspended` 沒有。
+- bot 開單時讀取：查不到、`until` 已經過了、格式不對時當作沒有封禁；封禁中的帳號同時只能開 1 張客服單，開單的 embed 標示封禁的原因與到期時間（docs/tickets.md 5.2）。
+- 讀取失敗（session store 無法連線）時不擋開單。
 
 ## 6. CORS
 

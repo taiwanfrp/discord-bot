@@ -54,7 +54,7 @@
 - [x] `GET /guild/channels`、`GET /guild/roles`
 - [x] 主要 API 依照 `docs/auth.md` 第 5 節實作：session 的 key 改成 token 的雜湊、`POST /api/v1/auth/ticket-code`；bot 讀取主要 API 的 session 格式（JSON、帳號狀態）
 - [x] `GET /me` 加上 `guild_id`（網頁組出客服單頻道的網址）；客服單列表加上 `last_message_at`
-- [ ] session store 的專用 ACL 帳號（只能讀取 session、讀取並刪除授權碼）
+- [ ] session store 的專用 ACL 帳號（只能讀取 session、讀取並刪除授權碼、讀取封禁）
 
 ## 4. 設定 API
 

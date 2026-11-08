@@ -51,9 +51,11 @@ async def test_me_follows_main_session(env: Env) -> None:
     assert (await env.client.get("/me")).status_code == 401
 
 
-@pytest.mark.parametrize(("status", "allowed"), [("suspended", True), ("banned", False)])
+@pytest.mark.parametrize(
+    ("status", "allowed"), [("suspended", True), ("banned", True), ("deleted", False)]
+)
 async def test_account_status(env: Env, status: str, allowed: bool) -> None:
-    """停權中的帳號可以使用客服單，封鎖的不行。"""
+    """停權、封禁中的帳號可以使用客服單，刪除的不行。"""
     await env.login_main_api(status=status)
     assert ((await env.exchange()).status_code == 200) is allowed
 
@@ -63,12 +65,12 @@ async def test_me_checks_account_status(env: Env) -> None:
     await env.exchange()
     assert (await env.client.get("/me")).status_code == 200
 
-    # 主要 API 封鎖帳號時會更新所有 session 的狀態
+    # 主要 API 刪除帳號時會更新所有 session 的狀態
     key = f"auth:session:{session_hash}"
     raw = await env.sessions.get(key)
     assert raw is not None
     session = json.loads(raw)
-    session["internal_account_status"] = "banned"
+    session["internal_account_status"] = "deleted"
     await env.sessions.set(key, json.dumps(session), keepttl=True)
     assert (await env.client.get("/me")).status_code == 401
 

@@ -4,7 +4,7 @@ from collections.abc import Sequence
 import discord
 from sqlalchemy import select
 
-from bot.core.redis import get_redis
+from bot.core.redis import get_redis, get_session_redis
 from bot.db.engine import get_sessionmaker
 from bot.db.models import Source, TicketCategory
 from bot.tickets.errors import TicketError
@@ -62,6 +62,7 @@ class OpenTicketModal(discord.ui.Modal):
                     subject=self.subject.value,
                     content=self.content.value,
                     source=Source.DISCORD,
+                    session_redis=get_session_redis(),
                 )
             except TicketError as error:
                 await interaction.followup.send(error.message, ephemeral=True)

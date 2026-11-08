@@ -7,7 +7,16 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.api.deps import BotDep, DBDep, GuildDep, RedisDep, S3Dep, Viewer, ViewerDep
+from bot.api.deps import (
+    BotDep,
+    DBDep,
+    GuildDep,
+    RedisDep,
+    S3Dep,
+    SessionRedisDep,
+    Viewer,
+    ViewerDep,
+)
 from bot.api.guild_utils import discord_errors
 from bot.api.output import guild_mentions, user_out
 from bot.api.schemas import (
@@ -154,7 +163,12 @@ async def get_ticket(
 
 @router.post("", status_code=201)
 async def create_ticket(
-    body: TicketIn, viewer: ViewerDep, guild: GuildDep, db: DBDep, redis: RedisDep
+    body: TicketIn,
+    viewer: ViewerDep,
+    guild: GuildDep,
+    db: DBDep,
+    redis: RedisDep,
+    session_redis: SessionRedisDep,
 ) -> TicketOut:
     """從網頁開單。開單者不在伺服器裡也可以（例如被停權的人申請解除停權）。"""
     with ticket_errors():
@@ -167,6 +181,7 @@ async def create_ticket(
             subject=body.subject,
             content=body.content,
             source=Source.WEB,
+            session_redis=session_redis,
         )
     return TicketOut.model_validate(ticket)
 
