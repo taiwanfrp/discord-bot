@@ -76,8 +76,10 @@ broker = RedisStreamBroker(
 @broker.on_event(TaskiqEvents.WORKER_STARTUP)
 async def _worker_startup(state: TaskiqState) -> None:
     # worker 只使用 Discord 的 REST API，不連 gateway
-    # （沒有 gateway，intents 沒有作用；用 default 只是避免 discord.py 警告）
-    state.discord = discord.Client(intents=discord.Intents.default())
+    # （沒有 gateway，intents 沒有作用；members 是因為 fetch_members 會先檢查）
+    intents = discord.Intents.default()
+    intents.members = True
+    state.discord = discord.Client(intents=intents)
     await state.discord.login(settings.discord_token.get_secret_value())
 
 

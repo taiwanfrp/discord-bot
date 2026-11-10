@@ -22,7 +22,7 @@ def get_redis() -> Redis:
 
 @lru_cache
 def get_session_redis() -> Redis:
-    """主要 API 的 session store，只能讀取 session、讀取並刪除授權碼（docs/auth.md 4.5）。"""
+    """主要 API 的 session store（權限見 docs/auth.md 4.5）。"""
     return Redis.from_url(get_settings().session_redis_url, decode_responses=True)
 
 

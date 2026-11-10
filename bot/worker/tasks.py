@@ -10,8 +10,9 @@ from redis.exceptions import LockError
 from sqlalchemy import and_, or_, select
 from taskiq import Context
 
+from bot.core import members
 from bot.core.config import get_settings
-from bot.core.redis import get_redis
+from bot.core.redis import get_redis, get_session_redis
 from bot.db.engine import get_sessionmaker
 from bot.db.models import (
     AttachmentStatus,
@@ -53,6 +54,14 @@ async def sync_pending_openers(discord_client: discord.Client = DiscordDep) -> N
                 continue
             # 寫入的 ticket_event 會在 commit 後自動通知 bot（bot/db/hooks.py）
             await add_opener(db, ticket, channel, member)
+
+
+@broker.task(schedule=[{"cron": "*/10 * * * *"}])
+async def sync_member_names(discord_client: discord.Client = DiscordDep) -> None:
+    """伺服器成員的名稱寫進 session store，給主要 API 顯示（docs/auth.md 5.6）。"""
+    guild = await discord_client.fetch_guild(get_settings().guild_id)
+    count = await members.sync_members(get_session_redis(), guild.fetch_members(limit=None))
+    log.info("已同步 %d 位成員的名稱", count)
 
 
 @broker.task

@@ -139,11 +139,12 @@ bot 使用 Redis ACL 的專用帳號，只能：
 - **讀取**主要 API 的 session（`auth:session:*`）。session 裡還有 email 等資料，bot 只使用 `discord_id` 與帳號狀態，不記錄其他欄位。
 - **讀取並刪除**授權碼（`auth:ticket_code:*`）。
 - **讀取**帳號的封禁（`auth:ban:*`，5.5）。
+- **寫入**伺服器成員的名稱（`discord:member:*`，5.6）。
 
 ACL 範例：
 
 ```
-ACL SETUSER ticket-bot on >密碼 resetkeys ~auth:session:* ~auth:ticket_code:* ~auth:ban:* resetchannels -@all +ping +get +ttl +getdel
+ACL SETUSER ticket-bot on >密碼 resetkeys ~auth:session:* ~auth:ticket_code:* ~auth:ban:* ~discord:member:* resetchannels -@all +ping +get +ttl +getdel +set
 ```
 
 `SESSION_REDIS_URL` 要跟主要 API 的 `REDIS_URL` 使用同一個 db。不是 db 0 的話（網址結尾的 `/數字`），連線時會先切換 db，ACL 要再加上 `+select`。
@@ -224,6 +225,25 @@ value： JSON 字串
 - 只有 `banned` 的帳號有這個 key，`suspended` 沒有。
 - bot 開單時讀取：查不到、`until` 已經過了、格式不對時當作沒有封禁；封禁中的帳號同時只能開 1 張客服單，開單的 embed 標示封禁的原因與到期時間（docs/tickets.md 5.2）。
 - 讀取失敗（session store 無法連線）時不擋開單。
+
+### 5.6 伺服器成員的名稱
+
+主要 API 的資料表沒有使用者名稱，所以由 bot 把伺服器成員的名稱寫進 session store，主要 API 用 Discord ID 查詢：
+
+```
+key：   discord:member:<discord_id>
+value： JSON 字串
+          username      使用者名稱
+          global_name   顯示名稱，沒有時是 null
+          nick          伺服器暱稱，沒有時是 null
+          avatar        頭像的 hash，沒有時是 null
+          guild_avatar  伺服器頭像的 hash，沒有時是 null
+過期：  1 小時
+```
+
+- scheduler 每 10 分鐘放入 `sync_member_names`，worker 用 REST API 取得所有成員（不包括 bot），重新寫入並設定 TTL。退出伺服器的人沒有再寫入，最晚 1 小時後消失；同步連續失敗超過 1 小時的話，所有成員的名稱都會消失，主要 API 要能處理查不到的情況。
+- 改名、新加入的成員最多要等 10 分鐘才會出現；不在伺服器裡的人查不到。
+- 主要 API 只需要讀取（一個人用 `GET`，一頁用 `MGET`）。
 
 ## 6. CORS
 

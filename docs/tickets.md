@@ -490,6 +490,7 @@ sequenceDiagram
 | `requeue_close_notifications()`：重新放入一天內關閉、私訊還沒處理完的 `send_close_notifications` | scheduler（每 10 分鐘） |
 | `check_inactive_tickets()`：閒置提醒、自動關閉 | scheduler（每 5 分鐘） |
 | `sync_pending_openers()`：把已經加入伺服器的開單者加進頻道（補 `on_member_join` 錯過的事件） | scheduler（每 5 分鐘） |
+| `sync_member_names()`：把伺服器成員的名稱寫進 session store，給主要 API 顯示（docs/auth.md 5.6） | scheduler（每 10 分鐘） |
 | `sync_ticket_permissions()`：讓開啟中客服單頻道的身份組權限覆寫，跟權限身份組的設定一致 | bot（API 修改權限身份組後） |
 
 ### 11.2 可靠性規則
